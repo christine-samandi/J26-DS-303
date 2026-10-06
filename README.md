@@ -77,8 +77,7 @@ All components communicate through **frozen JSON contracts** in `contracts/`, so
 
 We use **short-lived feature branches, prefixed by component**.
 
-- `main` is protected and always stable. Nobody pushes to it directly.
-- `dev` is the integration branch, used for testing before milestones.
+- `main` is protected and always stable. Nobody pushes to it directly; all work reaches it through Pull Requests.
 - Feature branches follow the pattern `<component>/<type>/<short-description>`:
 
 ```
@@ -92,10 +91,10 @@ contracts/update/retrieval-output-v2
 **Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
 
 ### Rules
-1. Branch off `dev`, keep branches small, and merge within a few days.
+1. Branch off `main`, keep branches small, and merge within a few days.
 2. All merges go through a **Pull Request** with at least **1 reviewer**.
 3. Changes to `contracts/` require approval from **all four members** (enforced via `CODEOWNERS`).
-4. Sync with `dev` regularly to avoid painful conflicts.
+4. Sync with `main` regularly to avoid painful conflicts.
 5. Milestones are tagged on `main` (e.g. `v0.5-pp1`).
 
 ### Commit messages
