@@ -1,0 +1,19 @@
+# Local Neo4j for the C3 knowledge graph.
+#   docker compose up -d        → start (browser UI: http://localhost:7474)
+#   docker compose down         → stop (data is kept in the neo4j_data volume)
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: c3-neo4j
+    ports:
+      - "7474:7474"   # browser UI
+      - "7687:7687"   # bolt (used by the Python driver)
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+      NEO4J_server_memory_heap_max__size: 1G
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:

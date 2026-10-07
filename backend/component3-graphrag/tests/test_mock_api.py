@@ -1,0 +1,64 @@
+"""The mock /retrieve endpoint accepts contract requests and returns contract responses."""
+
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from c3_common.config import get_settings
+from c3_common.contracts import OUTPUT_SCHEMA, contract_errors
+from retrieval_api.app import app
+
+client = TestClient(app)
+MOCK_DIR = get_settings().contracts_dir / "mock_data" / "retrieval_output_examples"
+
+
+def _request(name):
+    return json.loads((MOCK_DIR / name).read_text(encoding="utf-8"))
+
+
+def test_health():
+    assert client.get("/health").json()["status"] == "ok"
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in MOCK_DIR.glob("request_*.json")))
+def test_retrieve_returns_valid_contract(name):
+    req = _request(name)
+    res = client.post("/retrieve", json=req)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert contract_errors(body, OUTPUT_SCHEMA) == []
+    assert body["request_id"] == req["request_id"]
+    assert body["query"]["as_of_date"] == req["as_of_date"]
+
+
+def test_point_in_time_returns_rule_in_force_then():
+    req = _request("request_02_point_in_time_with_history.json")
+    body = client.post("/retrieve", json=req).json()
+    top = body["results"][0]
+    assert top["validity"]["in_force_on_as_of_date"] is True
+    assert top["validity"]["status"] == "replaced"
+
+
+def test_without_history_only_in_force_rules_returned():
+    req = _request("request_02_point_in_time_with_history.json")
+    req["include_history"] = False
+    body = client.post("/retrieve", json=req).json()
+    assert body["results"]
+    assert all(r["validity"]["in_force_on_as_of_date"] for r in body["results"])
+
+
+def test_unknown_topic_returns_no_match():
+    req = {
+        "schema_version": "1.0.0",
+        "request_id": "t-1",
+        "query_text": "customs duty on cars",
+        "as_of_date": "2026-10-08",
+    }
+    body = client.post("/retrieve", json=req).json()
+    assert body["results"] == [] and "NO_MATCH" in body["warnings"]
+
+
+def test_invalid_request_rejected():
+    res = client.post("/retrieve", json={"request_id": "t-2"})
+    assert res.status_code == 422
