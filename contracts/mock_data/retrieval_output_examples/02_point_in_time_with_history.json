@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "req-0002",
+  "generated_at": "2026-10-08T10:01:00+05:30",
+  "query": {
+    "query_text": "What personal relief applied on 1 June 2021?",
+    "as_of_date": "2021-06-01",
+    "taxpayer_category": "resident_individual",
+    "rule_types": [
+      "relief"
+    ],
+    "top_k": 3,
+    "include_history": true
+  },
+  "results": [
+    {
+      "rank": 1,
+      "rule_id": "RULE-PERSONAL_RELIEF-V2",
+      "rule_key": "personal_relief",
+      "rule_type": "relief",
+      "title": "Personal relief for resident individuals",
+      "text": "A resident individual is entitled to a personal relief of Rs. 3,000,000 for a year of assessment.",
+      "values": {
+        "amount": {
+          "amount": 3000000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-A",
+        "document_title": "Inland Revenue (Amendment) Act [MOCK A]",
+        "document_type": "amendment_act",
+        "act_number": "TBC",
+        "section": "TBC",
+        "citation": "Inland Revenue (Amendment) Act [MOCK A], s.TBC (personal relief)"
+      },
+      "validity": {
+        "valid_from": "2020-04-01",
+        "valid_to": "2022-12-31",
+        "status": "replaced",
+        "in_force_on_as_of_date": true,
+        "superseded_by": "RULE-PERSONAL_RELIEF-V3",
+        "supersedes": "RULE-PERSONAL_RELIEF-V1",
+        "changed_by_document_id": "DOC-IRA-AMEND-A"
+      },
+      "confidence": {
+        "score": 0.92,
+        "level": "high",
+        "components": {
+          "semantic_similarity": 0.91,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-A-0042"
+        ],
+        "matched_text": "[MOCK verbatim text] ... personal relief of Rs. 3,000,000 ...",
+        "graph_path": [
+          {
+            "from": "RULE-PERSONAL_RELIEF-V2",
+            "relation": "DEFINED_IN",
+            "to": "DOC-IRA-AMEND-A"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V2",
+            "relation": "APPLIES_TO",
+            "to": "resident_individual"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V2",
+            "relation": "SUPERSEDES",
+            "to": "RULE-PERSONAL_RELIEF-V1"
+          }
+        ],
+        "matched_entities": [
+          {
+            "text": "Rs. 3,000,000",
+            "label": "AMOUNT"
+          },
+          {
+            "text": "personal relief",
+            "label": "RELIEF"
+          }
+        ]
+      }
+    },
+    {
+      "rank": 2,
+      "rule_id": "RULE-PERSONAL_RELIEF-V3",
+      "rule_key": "personal_relief",
+      "rule_type": "relief",
+      "title": "Personal relief for resident individuals",
+      "text": "A resident individual is entitled to a personal relief of Rs. 1,200,000 for a year of assessment.",
+      "values": {
+        "amount": {
+          "amount": 1200000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-B",
+        "document_title": "Inland Revenue (Amendment) Act [MOCK B]",
+        "document_type": "amendment_act",
+        "act_number": "TBC",
+        "section": "TBC",
+        "citation": "Inland Revenue (Amendment) Act [MOCK B], s.TBC (personal relief)"
+      },
+      "validity": {
+        "valid_from": "2023-01-01",
+        "valid_to": "2025-03-31",
+        "status": "replaced",
+        "in_force_on_as_of_date": false,
+        "superseded_by": "RULE-PERSONAL_RELIEF-V4",
+        "supersedes": "RULE-PERSONAL_RELIEF-V2",
+        "changed_by_document_id": "DOC-IRA-AMEND-B"
+      },
+      "confidence": {
+        "score": 0.41,
+        "level": "low",
+        "components": {
+          "semantic_similarity": 0.91,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 0.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-B-0042"
+        ],
+        "matched_text": "[MOCK verbatim text] ... personal relief of Rs. 1,200,000 ...",
+        "graph_path": [
+          {
+            "from": "RULE-PERSONAL_RELIEF-V3",
+            "relation": "DEFINED_IN",
+            "to": "DOC-IRA-AMEND-B"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V3",
+            "relation": "APPLIES_TO",
+            "to": "resident_individual"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V3",
+            "relation": "SUPERSEDES",
+            "to": "RULE-PERSONAL_RELIEF-V2"
+          }
+        ],
+        "matched_entities": [
+          {
+            "text": "Rs. 1,200,000",
+            "label": "AMOUNT"
+          },
+          {
+            "text": "personal relief",
+            "label": "RELIEF"
+          }
+        ]
+      }
+    },
+    {
+      "rank": 3,
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "rule_key": "personal_relief",
+      "rule_type": "relief",
+      "title": "Personal relief for resident individuals",
+      "text": "A resident individual is entitled to a personal relief of Rs. 1,800,000 for a year of assessment.",
+      "values": {
+        "amount": {
+          "amount": 1800000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-C",
+        "document_title": "Inland Revenue (Amendment) Act [MOCK C]",
+        "document_type": "amendment_act",
+        "act_number": "TBC",
+        "section": "TBC",
+        "citation": "Inland Revenue (Amendment) Act [MOCK C], s.TBC (personal relief)"
+      },
+      "validity": {
+        "valid_from": "2025-04-01",
+        "valid_to": null,
+        "status": "active",
+        "in_force_on_as_of_date": false,
+        "superseded_by": null,
+        "supersedes": "RULE-PERSONAL_RELIEF-V3",
+        "changed_by_document_id": "DOC-IRA-AMEND-C"
+      },
+      "confidence": {
+        "score": 0.4,
+        "level": "low",
+        "components": {
+          "semantic_similarity": 0.91,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 0.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-C-0042"
+        ],
+        "matched_text": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+        "graph_path": [
+          {
+            "from": "RULE-PERSONAL_RELIEF-V4",
+            "relation": "DEFINED_IN",
+            "to": "DOC-IRA-AMEND-C"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V4",
+            "relation": "APPLIES_TO",
+            "to": "resident_individual"
+          },
+          {
+            "from": "RULE-PERSONAL_RELIEF-V4",
+            "relation": "SUPERSEDES",
+            "to": "RULE-PERSONAL_RELIEF-V3"
+          }
+        ],
+        "matched_entities": [
+          {
+            "text": "Rs. 1,800,000",
+            "label": "AMOUNT"
+          },
+          {
+            "text": "personal relief",
+            "label": "RELIEF"
+          }
+        ]
+      }
+    }
+  ],
+  "warnings": [],
+  "metadata": {
+    "retrieval_mode": "mock",
+    "latency_ms": 0,
+    "corpus_version": "mock-2026-10-08",
+    "embedding_model": "none (mock)",
+    "candidates_considered": 24,
+    "confidence_method": "mock"
+  }
+}

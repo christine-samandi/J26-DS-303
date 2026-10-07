@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/christine-samandi/J26-DS-303/contracts/schemas/retrieval_request.schema.json",
+  "title": "RetrievalRequest",
+  "description": "Query sent to Component 3 (GraphRAG regulatory retrieval) by Component 1 (orchestrator) or Component 4 (assurance). Owner: C3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "as_of_date"],
+  "anyOf": [
+    { "required": ["query_text"] },
+    { "required": ["rule_types"] },
+    { "required": ["rule_ids"] }
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Contract version this request follows (semver).",
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "request_id": {
+      "description": "Caller-generated ID, echoed in the response and used for pipeline tracing.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "caller": {
+      "description": "Which component sent the request.",
+      "type": "string",
+      "enum": ["c1-orchestrator", "c4-assurance", "evaluation", "manual"]
+    },
+    "query_text": {
+      "description": "Natural-language question or tax scenario. PII must already be redacted by the caller.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "as_of_date": {
+      "description": "Point-in-time date (YYYY-MM-DD). Only rules in force on this date are treated as applicable. Use today's date for current law; use a past date for an earlier year of assessment.",
+      "type": "string",
+      "format": "date"
+    },
+    "income_types": {
+      "description": "Optional filter: income types the scenario involves.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/income_type" }
+    },
+    "taxpayer_category": {
+      "description": "Optional filter: who the rule must apply to.",
+      "$ref": "#/$defs/taxpayer_category"
+    },
+    "rule_types": {
+      "description": "Optional filter: only return these kinds of rule.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule_type" }
+    },
+    "rule_ids": {
+      "description": "Optional: fetch these exact rules (e.g. C4 re-checking a citation C1 used).",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^RULE-[A-Z0-9_-]+$" }
+    },
+    "top_k": {
+      "description": "Maximum number of rules to return.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5
+    },
+    "include_history": {
+      "description": "If true, also return replaced/outdated versions of matched rules (status != active), not only the version applicable on as_of_date.",
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "$defs": {
+    "income_type": {
+      "type": "string",
+      "enum": ["employment", "business", "investment", "other"]
+    },
+    "taxpayer_category": {
+      "type": "string",
+      "enum": ["resident_individual", "non_resident_individual", "senior_citizen", "any"]
+    },
+    "rule_type": {
+      "type": "string",
+      "enum": ["tax_slab", "tax_rate", "relief", "deduction", "exemption", "penalty", "definition", "other"]
+    }
+  }
+}
