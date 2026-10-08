@@ -56,18 +56,17 @@ All components communicate through **frozen JSON contracts** in `contracts/`, so
 
 ```
 .
-├── contracts/            # Shared JSON schemas (frozen; changes need full-team approval)
-│   ├── ocr_output.json
-│   ├── retrieval_output.json
-│   ├── pipeline_trace.json
-│   └── assurance_verdict.json
-├── orchestrator/         # C1 – agent orchestration, tax engine, XAI layer
-├── frontend/             # C1 – user interface
-├── ocr/                  # C2 – document understanding
-├── graphrag/             # C3 – knowledge graph & retrieval
-├── assurance/            # C4 – output assurance & drift monitoring
-├── mocks/                # Mock data for independent development
-├── docs/                 # Reports, diagrams, references
+├── .github/workflows/          # CI: lint + tests on every Pull Request
+├── contracts/                  # Shared JSON contracts (frozen; changes need full-team approval)
+│   ├── schemas/                # *.schema.json — ocr_output, retrieval_output, pipeline_trace, assurance_verdict
+│   ├── mock_data/              # Example JSON per contract, for developing against mocks
+│   └── CONTRACT_CHANGELOG.md   # Every schema change, with date, author and reason
+├── backend/
+│   ├── component1-orchestrator/  # C1 – orchestration, tax engine, XAI layer, API
+│   ├── component2-ocr/           # C2 – document understanding
+│   ├── component3-graphrag/      # C3 – knowledge graph & retrieval
+│   └── component4-assurance/     # C4 – output assurance & drift monitoring
+├── frontend/                   # C1 – user interface
 └── README.md
 ```
 
@@ -75,9 +74,10 @@ All components communicate through **frozen JSON contracts** in `contracts/`, so
 
 ## 🌿 Branching Strategy
 
-We use **short-lived feature branches, prefixed by component**.
+We use **short-lived feature branches, prefixed by component**, merged into a shared `dev` branch.
 
-- `main` is protected and always stable. Nobody pushes to it directly; all work reaches it through Pull Requests.
+- `main` is protected and always stable. Nobody pushes to it directly; it only receives Pull Requests from `dev`.
+- `dev` is the integration branch, used for testing before milestones. All feature work is merged here first.
 - Feature branches follow the pattern `<component>/<type>/<short-description>`:
 
 ```
@@ -90,12 +90,21 @@ contracts/update/retrieval-output-v2
 
 **Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
 
+### Workflow
+```bash
+git switch dev && git pull                     # start from the latest dev
+git switch -c ocr/feat/payslip-parser          # create your feature branch
+# ...commit your work...
+git push -u origin ocr/feat/payslip-parser     # then open a Pull Request into dev
+```
+
 ### Rules
-1. Branch off `main`, keep branches small, and merge within a few days.
-2. All merges go through a **Pull Request** with at least **1 reviewer**.
-3. Changes to `contracts/` require approval from **all four members** (enforced via `CODEOWNERS`).
-4. Sync with `main` regularly to avoid painful conflicts.
-5. Milestones are tagged on `main` (e.g. `v0.5-pp1`).
+1. Branch off `dev`, keep branches small, and merge within a few days.
+2. Feature branches merge into `dev` through a **Pull Request** with at least **1 reviewer**.
+3. `dev` is merged into `main` through a Pull Request once it is stable (at least before each milestone).
+4. Changes to `contracts/` require approval from **all four members**.
+5. Sync your branch with `dev` regularly to avoid painful conflicts.
+6. Milestones are tagged on `main` (e.g. `v0.5-pp1`).
 
 ### Commit messages
 ```
@@ -110,15 +119,17 @@ fix(orchestrator): correct APIT relief calculation
 ## 🚀 Getting Started
 
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd <repo-name>
+# Clone the repo and switch to the integration branch
+git clone https://github.com/christine-samandi/J26-DS-303.git
+cd J26-DS-303
+git switch dev
 
-# Set up your component (example)
-cd orchestrator
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+# Set up a component (example: C1, Python 3.11+)
+cd backend/component1-orchestrator
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
 ```
 
 > Each component folder has its own `README.md` with specific setup and run instructions.
