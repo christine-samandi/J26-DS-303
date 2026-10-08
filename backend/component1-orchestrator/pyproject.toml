@@ -7,8 +7,11 @@ name = "component1-orchestrator"
 version = "0.1.0"
 description = "C1 — Agentic orchestrator, deterministic tax calculation agent, explanation agent"
 requires-python = ">=3.11"
+# j26-contracts is the shared contracts package in the repo (contracts/).
+# Install it first: pip install -e ../../contracts
 dependencies = [
-    "pydantic>=2.6",
+    "j26-contracts>=1.0.0",
+    "pydantic>=2.11",
     "pyyaml>=6.0",
 ]
 
