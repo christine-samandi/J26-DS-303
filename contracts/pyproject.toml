@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "j26-contracts"
+version = "1.0.0"
+description = "Shared Pydantic data contracts between J26-DS-303 components (source of truth for contracts/schemas)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.11",
+]
+
+[tool.setuptools.packages.find]
+include = ["j26_contracts*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

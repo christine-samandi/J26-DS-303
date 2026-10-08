@@ -1,63 +1,949 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/christine-samandi/J26-DS-303/contracts/schemas/retrieval_output.schema.json",
-  "title": "RetrievalOutput",
-  "description": "Response from Component 3 (GraphRAG regulatory retrieval). Consumed by C1 (tax calculation + explanation citations) and C4 (citation, evidence and effective-date verification). Owner: C3. Enum lists must stay identical to retrieval_request.schema.json.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "request_id", "generated_at", "query", "results", "warnings", "metadata"],
-  "properties": {
-    "schema_version": {
-      "type": "string",
-      "const": "1.0.0"
-    },
-    "request_id": {
-      "description": "Echo of RetrievalRequest.request_id.",
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128
-    },
-    "generated_at": {
-      "description": "When C3 produced this response (ISO 8601 with timezone).",
-      "type": "string",
-      "format": "date-time"
-    },
-    "query": {
-      "description": "Echo of the effective query after defaults were applied, so C4 can check the answer against what was actually asked.",
-      "type": "object",
+  "$comment": "GENERATED from contracts/j26_contracts by `python -m j26_contracts.export`. Do not edit.",
+  "$defs": {
+    "AppliesTo": {
       "additionalProperties": false,
-      "required": ["as_of_date", "top_k", "include_history"],
       "properties": {
-        "query_text": { "type": "string" },
-        "as_of_date": { "type": "string", "format": "date" },
         "income_types": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/income_type" }
+          "items": {
+            "enum": [
+              "employment",
+              "business",
+              "investment",
+              "other"
+            ],
+            "type": "string"
+          },
+          "title": "Income Types",
+          "type": "array"
         },
-        "taxpayer_category": { "$ref": "#/$defs/taxpayer_category" },
+        "taxpayer_categories": {
+          "items": {
+            "enum": [
+              "resident_individual",
+              "non_resident_individual",
+              "senior_citizen",
+              "any"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Taxpayer Categories",
+          "type": "array"
+        }
+      },
+      "required": [
+        "income_types",
+        "taxpayer_categories"
+      ],
+      "title": "AppliesTo",
+      "type": "object"
+    },
+    "Confidence": {
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        },
+        "level": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "components": {
+          "$ref": "#/$defs/ConfidenceComponents"
+        }
+      },
+      "required": [
+        "score",
+        "level",
+        "components"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "ConfidenceComponents": {
+      "additionalProperties": false,
+      "properties": {
+        "semantic_similarity": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Semantic Similarity",
+          "type": "number"
+        },
+        "graph_match": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Graph Match",
+          "type": "number"
+        },
+        "extraction_confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Extraction Confidence",
+          "type": "number"
+        },
+        "temporal_match": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Temporal Match",
+          "type": "number"
+        }
+      },
+      "required": [
+        "semantic_similarity",
+        "graph_match",
+        "extraction_confidence",
+        "temporal_match"
+      ],
+      "title": "ConfidenceComponents",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_ids": {
+          "items": {
+            "pattern": "^CHUNK-[A-Z0-9_-]+$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Chunk Ids",
+          "type": "array"
+        },
+        "matched_text": {
+          "description": "Verbatim source text. C4 verifies against it.",
+          "minLength": 1,
+          "title": "Matched Text",
+          "type": "string"
+        },
+        "graph_path": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/GraphEdge"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Graph Path"
+        },
+        "matched_entities": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MatchedEntity"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matched Entities"
+        }
+      },
+      "required": [
+        "chunk_ids",
+        "matched_text"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "GraphEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "DEFINED_IN",
+            "APPLIES_TO",
+            "AMENDS",
+            "SUPERSEDES",
+            "PART_OF",
+            "HAS_BAND",
+            "REFERS_TO"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "relation",
+        "to"
+      ],
+      "title": "GraphEdge",
+      "type": "object"
+    },
+    "MatchedEntity": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "label": {
+          "enum": [
+            "AMOUNT",
+            "RATE",
+            "DATE",
+            "SECTION_REF",
+            "RELIEF",
+            "DEDUCTION",
+            "EXEMPTION",
+            "INCOME_TYPE",
+            "TAXPAYER_CATEGORY",
+            "TAX_SLAB"
+          ],
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "label"
+      ],
+      "title": "MatchedEntity",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "retrieval_mode": {
+          "enum": [
+            "graphrag",
+            "flat_rag",
+            "mock"
+          ],
+          "title": "Retrieval Mode",
+          "type": "string"
+        },
+        "latency_ms": {
+          "minimum": 0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "corpus_version": {
+          "minLength": 1,
+          "title": "Corpus Version",
+          "type": "string"
+        },
+        "embedding_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Model"
+        },
+        "candidates_considered": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidates Considered"
+        },
+        "confidence_method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence Method"
+        }
+      },
+      "required": [
+        "retrieval_mode",
+        "latency_ms",
+        "corpus_version"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "minimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "currency": {
+          "const": "LKR",
+          "title": "Currency",
+          "type": "string"
+        },
+        "period": {
+          "anyOf": [
+            {
+              "enum": [
+                "year_of_assessment",
+                "month",
+                "one_off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Period"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "QueryEcho": {
+      "additionalProperties": false,
+      "properties": {
+        "query_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query Text"
+        },
+        "as_of_date": {
+          "format": "date",
+          "title": "As Of Date",
+          "type": "string"
+        },
+        "income_types": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "employment",
+                  "business",
+                  "investment",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Income Types"
+        },
+        "taxpayer_category": {
+          "anyOf": [
+            {
+              "enum": [
+                "resident_individual",
+                "non_resident_individual",
+                "senior_citizen",
+                "any"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Taxpayer Category"
+        },
         "rule_types": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/rule_type" }
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "tax_slab",
+                  "tax_rate",
+                  "relief",
+                  "deduction",
+                  "exemption",
+                  "penalty",
+                  "definition",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule Types"
         },
         "rule_ids": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/rule_id" }
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^RULE-[A-Z0-9_-]+$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule Ids"
         },
-        "top_k": { "type": "integer", "minimum": 1, "maximum": 20 },
-        "include_history": { "type": "boolean" }
-      }
+        "top_k": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Top K",
+          "type": "integer"
+        },
+        "include_history": {
+          "title": "Include History",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "as_of_date",
+        "top_k",
+        "include_history"
+      ],
+      "title": "QueryEcho",
+      "type": "object"
+    },
+    "RetrievedRule": {
+      "additionalProperties": false,
+      "properties": {
+        "rank": {
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rule_id": {
+          "description": "ID of this specific version of the rule.",
+          "pattern": "^RULE-[A-Z0-9_-]+$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rule_key": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Shared by all versions.",
+          "title": "Rule Key"
+        },
+        "rule_type": {
+          "enum": [
+            "tax_slab",
+            "tax_rate",
+            "relief",
+            "deduction",
+            "exemption",
+            "penalty",
+            "definition",
+            "other"
+          ],
+          "title": "Rule Type",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleValues"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "applies_to": {
+          "$ref": "#/$defs/AppliesTo"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        }
+      },
+      "required": [
+        "rank",
+        "rule_id",
+        "rule_type",
+        "title",
+        "text",
+        "applies_to",
+        "source",
+        "validity",
+        "confidence",
+        "evidence"
+      ],
+      "title": "RetrievedRule",
+      "type": "object"
+    },
+    "RuleValues": {
+      "additionalProperties": false,
+      "description": "Structured numbers for C1's deterministic engine. C1 must not parse numbers from text.",
+      "properties": {
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rate_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate Percent"
+        },
+        "bands": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SlabBand"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bands"
+        }
+      },
+      "title": "RuleValues",
+      "type": "object"
+    },
+    "SlabBand": {
+      "additionalProperties": false,
+      "properties": {
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        },
+        "lower": {
+          "minimum": 0,
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "null = no upper limit.",
+          "title": "Upper"
+        },
+        "rate_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Rate Percent",
+          "type": "number"
+        }
+      },
+      "required": [
+        "order",
+        "lower",
+        "rate_percent"
+      ],
+      "title": "SlabBand",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "pattern": "^DOC-[A-Z0-9_-]+$",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "document_title": {
+          "minLength": 1,
+          "title": "Document Title",
+          "type": "string"
+        },
+        "document_type": {
+          "enum": [
+            "act",
+            "amendment_act",
+            "gazette",
+            "circular",
+            "notice",
+            "guide"
+          ],
+          "title": "Document Type",
+          "type": "string"
+        },
+        "act_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Act Number"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Section"
+        },
+        "subsection": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subsection"
+        },
+        "paragraph": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paragraph"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schedule"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "citation": {
+          "description": "Ready-to-display citation for the user.",
+          "minLength": 1,
+          "title": "Citation",
+          "type": "string"
+        },
+        "published_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published Date"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "document_id",
+        "document_title",
+        "document_type",
+        "citation"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Validity": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "replaced"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "superseded_by": {
+                "pattern": "^RULE-[A-Z0-9_-]+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "superseded_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "active"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "valid_to": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "C3 versioning: when the rule applied, and what replaced it.",
+      "properties": {
+        "valid_from": {
+          "format": "date",
+          "title": "Valid From",
+          "type": "string"
+        },
+        "valid_to": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Last day in force (inclusive). null = still in force.",
+          "title": "Valid To"
+        },
+        "status": {
+          "description": "Lifecycle state TODAY.",
+          "enum": [
+            "active",
+            "replaced",
+            "outdated"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "in_force_on_as_of_date": {
+          "description": "Did the rule apply on the queried date?",
+          "title": "In Force On As Of Date",
+          "type": "boolean"
+        },
+        "superseded_by": {
+          "anyOf": [
+            {
+              "pattern": "^RULE-[A-Z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Superseded By"
+        },
+        "supersedes": {
+          "anyOf": [
+            {
+              "pattern": "^RULE-[A-Z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes"
+        },
+        "changed_by_document_id": {
+          "anyOf": [
+            {
+              "pattern": "^DOC-[A-Z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed By Document Id"
+        }
+      },
+      "required": [
+        "valid_from",
+        "valid_to",
+        "status",
+        "in_force_on_as_of_date"
+      ],
+      "title": "Validity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Response from Component 3, consumed by C1 (calculation, citations) and C4 (verification). Owner: C3.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "query": {
+      "$ref": "#/$defs/QueryEcho"
     },
     "results": {
-      "description": "Retrieved rules, ordered by rank (1 = best). May be empty; check warnings.",
-      "type": "array",
-      "items": { "$ref": "#/$defs/retrieved_rule" }
+      "items": {
+        "$ref": "#/$defs/RetrievedRule"
+      },
+      "title": "Results",
+      "type": "array"
     },
     "warnings": {
-      "description": "Machine-readable conditions C1/C4 should react to. Empty array if none.",
-      "type": "array",
-      "uniqueItems": true,
       "items": {
-        "type": "string",
         "enum": [
           "NO_MATCH",
           "NO_RULE_IN_FORCE_ON_DATE",
@@ -65,311 +951,26 @@
           "AMBIGUOUS_QUERY",
           "AS_OF_DATE_BEFORE_CORPUS",
           "PARTIAL_CORPUS_COVERAGE"
-        ]
-      }
+        ],
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array",
+      "uniqueItems": true
     },
     "metadata": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["retrieval_mode", "latency_ms", "corpus_version"],
-      "properties": {
-        "retrieval_mode": {
-          "description": "graphrag = proposed system; flat_rag = evaluation baseline; mock = served from contracts/mock_data.",
-          "type": "string",
-          "enum": ["graphrag", "flat_rag", "mock"]
-        },
-        "latency_ms": { "type": "number", "minimum": 0 },
-        "corpus_version": {
-          "description": "Identifier of the knowledge-base build that answered (changes whenever documents are re-ingested). Used by C4 drift monitoring.",
-          "type": "string",
-          "minLength": 1
-        },
-        "embedding_model": { "type": "string" },
-        "candidates_considered": { "type": "integer", "minimum": 0 },
-        "confidence_method": {
-          "description": "Short description or version tag of how confidence.score was computed.",
-          "type": "string"
-        }
-      }
+      "$ref": "#/$defs/Metadata"
     }
   },
-  "$defs": {
-    "rule_id": {
-      "type": "string",
-      "pattern": "^RULE-[A-Z0-9_-]+$"
-    },
-    "document_id": {
-      "type": "string",
-      "pattern": "^DOC-[A-Z0-9_-]+$"
-    },
-    "income_type": {
-      "type": "string",
-      "enum": ["employment", "business", "investment", "other"]
-    },
-    "taxpayer_category": {
-      "type": "string",
-      "enum": ["resident_individual", "non_resident_individual", "senior_citizen", "any"]
-    },
-    "rule_type": {
-      "type": "string",
-      "enum": ["tax_slab", "tax_rate", "relief", "deduction", "exemption", "penalty", "definition", "other"]
-    },
-    "probability": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
-    },
-    "money": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["amount", "currency"],
-      "properties": {
-        "amount": { "type": "number", "minimum": 0 },
-        "currency": { "type": "string", "const": "LKR" },
-        "period": {
-          "description": "What the amount is measured over.",
-          "type": "string",
-          "enum": ["year_of_assessment", "month", "one_off"]
-        }
-      }
-    },
-    "slab_band": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["order", "lower", "rate_percent"],
-      "properties": {
-        "order": { "type": "integer", "minimum": 1 },
-        "lower": {
-          "description": "Start of this band of taxable income (LKR, inclusive).",
-          "type": "number",
-          "minimum": 0
-        },
-        "upper": {
-          "description": "End of this band (LKR). null = no upper limit (top band).",
-          "type": ["number", "null"],
-          "minimum": 0
-        },
-        "rate_percent": { "type": "number", "minimum": 0, "maximum": 100 }
-      }
-    },
-    "rule_values": {
-      "description": "Structured numbers extracted from the rule, for C1's deterministic engine. Only the fields relevant to the rule_type are present. C1 must not parse numbers from text.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "amount": { "$ref": "#/$defs/money" },
-        "cap": {
-          "description": "Maximum amount allowed (e.g. a capped deduction).",
-          "$ref": "#/$defs/money"
-        },
-        "rate_percent": { "type": "number", "minimum": 0, "maximum": 100 },
-        "bands": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/$defs/slab_band" }
-        }
-      }
-    },
-    "source": {
-      "description": "Where the rule comes from. Used by C1 for citations and by C4 for citation-faithfulness checks.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["document_id", "document_title", "document_type", "citation"],
-      "properties": {
-        "document_id": { "$ref": "#/$defs/document_id" },
-        "document_title": { "type": "string", "minLength": 1 },
-        "document_type": {
-          "type": "string",
-          "enum": ["act", "amendment_act", "gazette", "circular", "notice", "guide"]
-        },
-        "act_number": {
-          "description": "e.g. '24 of 2017'. Present for acts and amendment acts.",
-          "type": "string"
-        },
-        "section": { "type": "string" },
-        "subsection": { "type": "string" },
-        "paragraph": { "type": "string" },
-        "schedule": {
-          "description": "Schedule name/number if the rule sits in a schedule rather than a numbered section.",
-          "type": "string"
-        },
-        "page": { "type": "integer", "minimum": 1 },
-        "citation": {
-          "description": "Ready-to-display human citation, e.g. 'Inland Revenue Act No. 24 of 2017, s.X(Y)'.",
-          "type": "string",
-          "minLength": 1
-        },
-        "published_date": { "type": "string", "format": "date" },
-        "url": { "type": "string", "format": "uri" }
-      }
-    },
-    "validity": {
-      "description": "Temporal validity (C3 versioning). 'status' is the rule's lifecycle state TODAY; 'in_force_on_as_of_date' says whether it applied on the queried date. An old rule can be status=replaced yet in_force_on_as_of_date=true for a past query.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["valid_from", "valid_to", "status", "in_force_on_as_of_date"],
-      "properties": {
-        "valid_from": { "type": "string", "format": "date" },
-        "valid_to": {
-          "description": "Last day the rule applied (inclusive). null = still in force.",
-          "type": ["string", "null"],
-          "format": "date"
-        },
-        "status": {
-          "type": "string",
-          "enum": ["active", "replaced", "outdated"],
-          "description": "active = currently in force; replaced = superseded by a newer version of the same rule; outdated = no longer in force and not replaced (e.g. repealed or expired)."
-        },
-        "in_force_on_as_of_date": { "type": "boolean" },
-        "superseded_by": {
-          "description": "rule_id of the newer version, when status = replaced.",
-          "oneOf": [{ "$ref": "#/$defs/rule_id" }, { "type": "null" }]
-        },
-        "supersedes": {
-          "description": "rule_id of the older version this rule replaced, if any.",
-          "oneOf": [{ "$ref": "#/$defs/rule_id" }, { "type": "null" }]
-        },
-        "changed_by_document_id": {
-          "description": "Amendment document that introduced this version.",
-          "oneOf": [{ "$ref": "#/$defs/document_id" }, { "type": "null" }]
-        }
-      },
-      "allOf": [
-        {
-          "if": { "properties": { "status": { "const": "replaced" } } },
-          "then": {
-            "required": ["superseded_by"],
-            "properties": { "superseded_by": { "$ref": "#/$defs/rule_id" } }
-          }
-        },
-        {
-          "if": { "properties": { "status": { "const": "active" } } },
-          "then": { "properties": { "valid_to": { "type": "null" } } }
-        }
-      ]
-    },
-    "confidence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["score", "level", "components"],
-      "properties": {
-        "score": {
-          "description": "Overall confidence that this rule correctly answers the query, 0-1.",
-          "$ref": "#/$defs/probability"
-        },
-        "level": {
-          "description": "Banded score so callers don't hard-code thresholds. Thresholds are listed in the C3 README.",
-          "type": "string",
-          "enum": ["high", "medium", "low"]
-        },
-        "components": {
-          "description": "Breakdown of the score. C4 uses this for risk scoring and drift monitoring.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["semantic_similarity", "graph_match", "extraction_confidence", "temporal_match"],
-          "properties": {
-            "semantic_similarity": { "$ref": "#/$defs/probability" },
-            "graph_match": { "$ref": "#/$defs/probability" },
-            "extraction_confidence": { "$ref": "#/$defs/probability" },
-            "temporal_match": { "$ref": "#/$defs/probability" }
-          }
-        }
-      }
-    },
-    "graph_edge": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["from", "relation", "to"],
-      "properties": {
-        "from": { "type": "string" },
-        "relation": {
-          "type": "string",
-          "enum": ["DEFINED_IN", "APPLIES_TO", "AMENDS", "SUPERSEDES", "PART_OF", "HAS_BAND", "REFERS_TO"]
-        },
-        "to": { "type": "string" }
-      }
-    },
-    "evidence": {
-      "description": "Why this rule was retrieved. C4 verifies claims against matched_text.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["chunk_ids", "matched_text"],
-      "properties": {
-        "chunk_ids": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "pattern": "^CHUNK-[A-Z0-9_-]+$" }
-        },
-        "matched_text": {
-          "description": "Verbatim source text the rule was extracted from.",
-          "type": "string",
-          "minLength": 1
-        },
-        "graph_path": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/graph_edge" }
-        },
-        "matched_entities": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["text", "label"],
-            "properties": {
-              "text": { "type": "string" },
-              "label": {
-                "type": "string",
-                "enum": ["AMOUNT", "RATE", "DATE", "SECTION_REF", "RELIEF", "DEDUCTION", "EXEMPTION", "INCOME_TYPE", "TAXPAYER_CATEGORY", "TAX_SLAB"]
-              }
-            }
-          }
-        }
-      }
-    },
-    "retrieved_rule": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["rank", "rule_id", "rule_type", "title", "text", "applies_to", "source", "validity", "confidence", "evidence"],
-      "properties": {
-        "rank": { "type": "integer", "minimum": 1 },
-        "rule_id": {
-          "description": "Stable ID of this specific rule version. Different versions of the same rule have different rule_ids, linked via validity.supersedes / superseded_by.",
-          "$ref": "#/$defs/rule_id"
-        },
-        "rule_key": {
-          "description": "Stable key shared by all versions of the same rule (e.g. 'personal_relief').",
-          "type": "string",
-          "pattern": "^[a-z0-9_]+$"
-        },
-        "rule_type": { "$ref": "#/$defs/rule_type" },
-        "title": { "type": "string", "minLength": 1 },
-        "text": {
-          "description": "Plain-language statement of the rule (normalised, not necessarily verbatim; verbatim text is in evidence.matched_text).",
-          "type": "string",
-          "minLength": 1
-        },
-        "values": { "$ref": "#/$defs/rule_values" },
-        "applies_to": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["income_types", "taxpayer_categories"],
-          "properties": {
-            "income_types": {
-              "type": "array",
-              "items": { "$ref": "#/$defs/income_type" }
-            },
-            "taxpayer_categories": {
-              "type": "array",
-              "minItems": 1,
-              "items": { "$ref": "#/$defs/taxpayer_category" }
-            }
-          }
-        },
-        "source": { "$ref": "#/$defs/source" },
-        "validity": { "$ref": "#/$defs/validity" },
-        "confidence": { "$ref": "#/$defs/confidence" },
-        "evidence": { "$ref": "#/$defs/evidence" }
-      }
-    }
-  }
+  "required": [
+    "schema_version",
+    "request_id",
+    "generated_at",
+    "query",
+    "results",
+    "warnings",
+    "metadata"
+  ],
+  "title": "RetrievalOutput",
+  "type": "object"
 }

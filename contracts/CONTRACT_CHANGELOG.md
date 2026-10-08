@@ -14,3 +14,12 @@ Any schema change must be reviewed by all components that depend on it.
   - `confidence` returns a score, a high/medium/low level, and a four-part breakdown for C4.
   - `evidence` returns verbatim matched text, chunk IDs and the graph path.
 - **Review needed from:** Fernando W I C S (C1), De Zoysa K R D P (C4), Senevirathne R S N N (C2, for awareness).
+
+## retrieval_request / retrieval_output — v1.0.0 defined as Pydantic models
+
+- **Date:** 2026-10-08
+- **Author:** Elvitigala C S (C3)
+- **Change:** The retrieval contract is now defined as Pydantic models in `j26_contracts/retrieval.py` (installable package `j26-contracts`). `schemas/retrieval_*.schema.json` are generated from the models (`python -m j26_contracts.export`) instead of being hand-written. Version stays 1.0.0: same fields, same rules; optional fields may now also be sent as `null`.
+- **Reason:** Supervisor recommended Pydantic for validating JSON structure. One definition instead of two, and every component can import the same models to validate what it sends and receives.
+- **Extra checks (Pydantic only):** `in_force_on_as_of_date` must match the rule's dates and the queried date; `valid_to` not before `valid_from`; results ranked 1..n; with `include_history: false` only rules in force are returned.
+- **Review needed from:** Fernando W I C S (C1), De Zoysa K R D P (C4), Senevirathne R S N N (C2, for awareness).

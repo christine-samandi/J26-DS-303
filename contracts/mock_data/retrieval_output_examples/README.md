@@ -2,7 +2,8 @@
 
 Example requests and responses for `contracts/schemas/retrieval_request.schema.json` and
 `retrieval_output.schema.json`. Use them to build and test C1 and C4 against C3 before the real
-retrieval API exists. Every file validates against its schema.
+retrieval API exists. Every file validates against its schema and loads into the Pydantic
+models in `contracts/j26_contracts/retrieval.py` (`RetrievalRequest` / `RetrievalOutput`).
 
 > ⚠️ **The amounts, dates, section numbers and amendment documents in these files are
 > placeholders.** They show the *shape* of the data only. Do not use them in tax calculations.
