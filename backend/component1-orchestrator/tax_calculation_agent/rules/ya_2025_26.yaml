@@ -1,0 +1,67 @@
+# Seed rules — Year of Assessment 2025/26 (1 April 2025 – 31 March 2026)
+#
+# Used to (a) run the engine before C3 is live and (b) cross-check C3's values.
+# If C3 and this file disagree, C1 flags a conflict — it never silently picks one.
+#
+# Field names follow the C3 retrieval contract (j26_contracts.retrieval):
+#   rule_key   -> RetrievedRule.rule_key, used to match against C3 results
+#   values     -> RuleValues (amount / bands), money in LKR, rates in percent
+#   validity   -> Validity.valid_from / valid_to
+#
+# Section numbers are "TBC" until filled in from the Act text or C3. Do not guess them.
+
+schema: c1-seed-rules/1
+year_of_assessment: "2025/26"
+period:
+  start: 2025-04-01
+  end: 2026-03-31
+
+sources:
+  - id: SRC-IRA-AMEND-2-2025
+    title: Inland Revenue (Amendment) Act No. 2 of 2025
+    note: Certified 20 March 2025
+  - id: SRC-IRD-PN-IT-2025-01
+    title: IRD notice PN/IT/2025-01
+
+rules:
+  - rule_id: SEED-PERSONAL_RELIEF-YA2025_26
+    rule_key: personal_relief
+    rule_type: relief
+    title: Personal relief for resident individuals (and non-resident citizens)
+    values:
+      amount:
+        amount: 1800000
+        currency: LKR
+        period: year_of_assessment
+    applies_to:
+      taxpayer_categories: [resident_individual]
+    validity:
+      valid_from: 2025-04-01
+      valid_to: null
+    source:
+      source_ids: [SRC-IRA-AMEND-2-2025, SRC-IRD-PN-IT-2025-01]
+      section: TBC
+      citation: Inland Revenue (Amendment) Act No. 2 of 2025, s.TBC (personal relief)
+
+  - rule_id: SEED-INDIVIDUAL_SLABS-YA2025_26
+    rule_key: individual_income_tax_slabs
+    rule_type: tax_slab
+    title: Income tax rates for individuals (progressive bands)
+    values:
+      # lower/upper are cumulative taxable income; upper: null = no upper limit
+      bands:
+        - {order: 1, lower: 0, upper: 1000000, rate_percent: 6}
+        - {order: 2, lower: 1000000, upper: 1500000, rate_percent: 18}
+        - {order: 3, lower: 1500000, upper: 2000000, rate_percent: 24}
+        - {order: 4, lower: 2000000, upper: 2500000, rate_percent: 30}
+        - {order: 5, lower: 2500000, upper: null, rate_percent: 36}
+    applies_to:
+      taxpayer_categories: [resident_individual]
+    validity:
+      valid_from: 2025-04-01
+      valid_to: null
+    source:
+      source_ids: [SRC-IRA-AMEND-2-2025, SRC-IRD-PN-IT-2025-01]
+      schedule: First Schedule
+      paragraph: TBC
+      citation: Inland Revenue (Amendment) Act No. 2 of 2025, First Schedule para. TBC (rates for individuals)
