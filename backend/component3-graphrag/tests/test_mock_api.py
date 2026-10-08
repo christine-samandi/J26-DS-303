@@ -62,3 +62,50 @@ def test_unknown_topic_returns_no_match():
 def test_invalid_request_rejected():
     res = client.post("/retrieve", json={"request_id": "t-2"})
     assert res.status_code == 422
+
+
+def _relief(as_of_date, include_history=False):
+    req = {
+        "schema_version": "1.0.0",
+        "request_id": "t-relief",
+        "query_text": "personal relief",
+        "as_of_date": as_of_date,
+        "include_history": include_history,
+    }
+    return client.post("/retrieve", json=req).json()
+
+
+@pytest.mark.parametrize(
+    "as_of_date,expected_rule",
+    [
+        ("2021-06-01", "RULE-PERSONAL_RELIEF-V2"),
+        ("2024-06-01", "RULE-PERSONAL_RELIEF-V3"),
+        ("2026-10-08", "RULE-PERSONAL_RELIEF-V4"),
+    ],
+)
+def test_point_in_time_picks_version_in_force(as_of_date, expected_rule):
+    body = _relief(as_of_date)
+    assert [r["rule_id"] for r in body["results"]] == [expected_rule]
+    assert body["results"][0]["validity"]["in_force_on_as_of_date"] is True
+
+
+def test_date_before_any_version_warns():
+    body = _relief("2019-01-01")
+    assert body["results"] == []
+    assert "NO_RULE_IN_FORCE_ON_DATE" in body["warnings"]
+    assert "AS_OF_DATE_BEFORE_CORPUS" in body["warnings"]
+
+
+def test_invalid_request_explains_which_field():
+    res = client.post(
+        "/retrieve",
+        json={
+            "schema_version": "1.0.0",
+            "request_id": "t-3",
+            "query_text": "x",
+            "as_of_date": "2026-10-08",
+            "top_k": 50,
+        },
+    )
+    assert res.status_code == 422
+    assert res.json()["detail"][0]["loc"][-1] == "top_k"

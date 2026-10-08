@@ -40,7 +40,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/component3-graphrag/pyproject.toml
       - name: Install
-        run: pip install -e ".[dev,api]"
+        run: pip install -e ../../contracts -e ".[dev,api]"
       - name: Lint
         run: ruff check .
       - name: Test

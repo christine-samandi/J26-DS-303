@@ -1,4 +1,4 @@
-"""Every mock example must match the contract, and the contract must reject bad data."""
+"""The generated JSON Schema files: up to date, every mock matches, bad data is rejected."""
 
 import copy
 import json
@@ -6,7 +6,8 @@ import json
 import pytest
 
 from c3_common.config import get_settings
-from c3_common.contracts import OUTPUT_SCHEMA, REQUEST_SCHEMA, contract_errors, load_schema
+from c3_common.contracts import OUTPUT_SCHEMA, REQUEST_SCHEMA, contract_errors
+from j26_contracts.export import stale_files
 
 MOCK_DIR = get_settings().contracts_dir / "mock_data" / "retrieval_output_examples"
 MOCK_FILES = sorted(MOCK_DIR.glob("*.json"))
@@ -26,10 +27,10 @@ def test_mock_matches_contract(path):
     assert contract_errors(json.loads(path.read_text(encoding="utf-8")), schema) == []
 
 
-def test_enums_identical_in_both_schemas():
-    req, out = load_schema(REQUEST_SCHEMA)["$defs"], load_schema(OUTPUT_SCHEMA)["$defs"]
-    for name in ("income_type", "taxpayer_category", "rule_type"):
-        assert req[name]["enum"] == out[name]["enum"], name
+def test_schema_files_generated_from_current_models():
+    """contracts/schemas/*.json must be regenerated whenever the Pydantic models change."""
+    stale = stale_files()
+    assert stale == [], f"out of date: {stale} — run: python -m j26_contracts.export"
 
 
 def test_replaced_rule_must_name_successor():

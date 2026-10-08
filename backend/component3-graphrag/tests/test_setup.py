@@ -9,7 +9,14 @@ from c3_common.config import get_settings
 
 @pytest.mark.parametrize(
     "module",
-    ["data_collection", "entity_recognition", "knowledge_graph", "vector_store", "retrieval_api"],
+    [
+        "data_collection",
+        "entity_recognition",
+        "knowledge_graph",
+        "vector_store",
+        "retrieval_api",
+        "j26_contracts.retrieval",
+    ],
 )
 def test_packages_import(module):
     importlib.import_module(module)

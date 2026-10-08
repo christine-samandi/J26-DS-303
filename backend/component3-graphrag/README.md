@@ -9,11 +9,23 @@ evidence-traceable, confidence-scored, point-in-time retrieval to C1 and C4.
 `contracts/schemas/retrieval_request.schema.json` and `retrieval_output.schema.json`.
 See `contracts/mock_data/retrieval_output_examples/README.md` for examples and consumer rules.
 
+**Validation (Pydantic):** the contract is defined as Pydantic models in the shared package
+`contracts/j26_contracts/retrieval.py` (the JSON Schema files are generated from them). C3 uses
+the same models as C1 and C4: FastAPI rejects bad requests with them (422 with the exact field
+and reason) and documents every field at `/docs`. Every response is validated by the models,
+then double-checked against the generated JSON Schema.
+
+The models also enforce rules JSON Schema cannot express:
+- `in_force_on_as_of_date` must match the rule's `valid_from`/`valid_to` and the queried date
+- `valid_to` cannot be before `valid_from`
+- results are ranked 1..n in order
+- with `include_history: false`, only rules in force on the date are returned
+
 ## Status
 
 | Part | Folder | Status |
 |---|---|---|
-| Contract + mock API | `retrieval_api/`, `contracts/` | ✅ v1.0.0 (mock mode) |
+| Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
 | Data acquisition | `data_collection/` | ⏳ Phase 1 |
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ⏳ Phase 2 |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ⏳ Phase 3 (connection helper ready) |
@@ -28,11 +40,12 @@ Requires Python 3.11+ and Docker Desktop (for Neo4j).
 cd backend/component3-graphrag
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -e ..\..\contracts        # shared contract models (macOS/Linux: ../../contracts)
 pip install -e ".[dev,api,graph]"
 
 copy .env.example .env            # macOS/Linux: cp .env.example .env  — then set NEO4J_PASSWORD
 
-pytest                            # contract + API tests
+pytest                            # contract, model and API tests
 ruff check .                      # lint
 ```
 
