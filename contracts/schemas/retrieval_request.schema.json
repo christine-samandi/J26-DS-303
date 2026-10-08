@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/christine-samandi/J26-DS-303/contracts/schemas/retrieval_request.schema.json",
+  "$comment": "GENERATED from contracts/j26_contracts by `python -m j26_contracts.export`. Do not edit.",
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "query_text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query_text"
+      ]
+    },
+    {
+      "properties": {
+        "rule_types": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_types"
+      ]
+    },
+    {
+      "properties": {
+        "rule_ids": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_ids"
+      ]
+    }
+  ],
+  "description": "Query sent to Component 3 (GraphRAG regulatory retrieval) by C1 or C4. Owner: C3.",
+  "examples": [
+    {
+      "as_of_date": "2021-06-01",
+      "include_history": true,
+      "query_text": "What personal relief applied?",
+      "request_id": "demo-1",
+      "schema_version": "1.0.0",
+      "taxpayer_category": "resident_individual"
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "description": "Caller-generated ID, echoed in the response.",
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "caller": {
+      "anyOf": [
+        {
+          "enum": [
+            "c1-orchestrator",
+            "c4-assurance",
+            "evaluation",
+            "manual"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Caller"
+    },
+    "query_text": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Natural-language question. PII must already be redacted.",
+      "title": "Query Text"
+    },
+    "as_of_date": {
+      "description": "Point-in-time date: only rules in force on it apply.",
+      "format": "date",
+      "title": "As Of Date",
+      "type": "string"
+    },
+    "income_types": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "employment",
+              "business",
+              "investment",
+              "other"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Income Types"
+    },
+    "taxpayer_category": {
+      "anyOf": [
+        {
+          "enum": [
+            "resident_individual",
+            "non_resident_individual",
+            "senior_citizen",
+            "any"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Taxpayer Category"
+    },
+    "rule_types": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "tax_slab",
+              "tax_rate",
+              "relief",
+              "deduction",
+              "exemption",
+              "penalty",
+              "definition",
+              "other"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rule Types"
+    },
+    "rule_ids": {
+      "anyOf": [
+        {
+          "items": {
+            "pattern": "^RULE-[A-Z0-9_-]+$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rule Ids"
+    },
+    "top_k": {
+      "default": 5,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Top K",
+      "type": "integer"
+    },
+    "include_history": {
+      "default": false,
+      "description": "Also return replaced/outdated versions of matched rules.",
+      "title": "Include History",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "as_of_date"
+  ],
+  "title": "RetrievalRequest",
+  "type": "object"
+}

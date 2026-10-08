@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "req-0003",
+  "generated_at": "2026-10-08T10:02:00+05:30",
+  "query": {
+    "query_text": "tax rates on salary for someone earning a lot",
+    "as_of_date": "2026-10-08",
+    "income_types": [
+      "employment"
+    ],
+    "top_k": 5,
+    "include_history": false
+  },
+  "results": [
+    {
+      "rank": 1,
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V3",
+      "rule_key": "individual_income_tax_slabs",
+      "rule_type": "tax_slab",
+      "title": "Income tax rates for individuals (progressive bands)",
+      "text": "Taxable income of an individual is taxed in progressive bands at the rates listed.",
+      "values": {
+        "bands": [
+          {
+            "order": 1,
+            "lower": 0,
+            "upper": 500000,
+            "rate_percent": 6
+          },
+          {
+            "order": 2,
+            "lower": 500000,
+            "upper": 1000000,
+            "rate_percent": 12
+          },
+          {
+            "order": 3,
+            "lower": 1000000,
+            "upper": 1500000,
+            "rate_percent": 18
+          },
+          {
+            "order": 4,
+            "lower": 1500000,
+            "upper": 2000000,
+            "rate_percent": 24
+          },
+          {
+            "order": 5,
+            "lower": 2000000,
+            "upper": 2500000,
+            "rate_percent": 30
+          },
+          {
+            "order": 6,
+            "lower": 2500000,
+            "upper": null,
+            "rate_percent": 36
+          }
+        ]
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual",
+          "non_resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-B",
+        "document_title": "Inland Revenue (Amendment) Act [MOCK B]",
+        "document_type": "amendment_act",
+        "act_number": "TBC",
+        "schedule": "First Schedule",
+        "citation": "Inland Revenue (Amendment) Act [MOCK B], First Schedule (rates for individuals)"
+      },
+      "validity": {
+        "valid_from": "2023-01-01",
+        "valid_to": null,
+        "status": "active",
+        "in_force_on_as_of_date": true,
+        "superseded_by": null,
+        "supersedes": "RULE-INDIVIDUAL_SLABS-V2",
+        "changed_by_document_id": "DOC-IRA-AMEND-B"
+      },
+      "confidence": {
+        "score": 0.46,
+        "level": "low",
+        "components": {
+          "semantic_similarity": 0.52,
+          "graph_match": 0.5,
+          "extraction_confidence": 0.7,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-B-0007",
+          "CHUNK-IRA-AMEND-B-0008"
+        ],
+        "matched_text": "[MOCK verbatim text] ... on the first Rs. 500,000 ... at 6 per cent ...",
+        "graph_path": [
+          {
+            "from": "RULE-INDIVIDUAL_SLABS-V3",
+            "relation": "DEFINED_IN",
+            "to": "DOC-IRA-AMEND-B"
+          },
+          {
+            "from": "RULE-INDIVIDUAL_SLABS-V3",
+            "relation": "HAS_BAND",
+            "to": "BAND-1"
+          }
+        ],
+        "matched_entities": [
+          {
+            "text": "6 per cent",
+            "label": "RATE"
+          },
+          {
+            "text": "Rs. 500,000",
+            "label": "AMOUNT"
+          }
+        ]
+      }
+    }
+  ],
+  "warnings": [
+    "LOW_CONFIDENCE",
+    "AMBIGUOUS_QUERY"
+  ],
+  "metadata": {
+    "retrieval_mode": "mock",
+    "latency_ms": 0,
+    "corpus_version": "mock-2026-10-08",
+    "embedding_model": "none (mock)",
+    "candidates_considered": 24,
+    "confidence_method": "mock"
+  }
+}
