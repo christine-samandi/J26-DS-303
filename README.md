@@ -128,6 +128,7 @@ git switch dev
 cd backend/component1-orchestrator
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ../../contracts   # shared contract models (j26_contracts)
 pip install -e ".[dev]"
 pytest
 ```
