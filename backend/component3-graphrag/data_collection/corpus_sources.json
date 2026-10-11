@@ -1,0 +1,49 @@
+{
+  "description": "C3 regulatory corpus for PP1: the Inland Revenue Act No. 24 of 2017 and the amendment Acts that changed personal relief or individual income tax rates. Checked 2026-10-11: Acts No. 4 of 2023, No. 14 of 2023 and No. 11 of 2026 do not change either, so they are excluded from the PP1 slice.",
+  "documents": [
+    {
+      "document_id": "DOC-IRA-2017",
+      "title": "Inland Revenue Act, No. 24 of 2017",
+      "document_type": "act",
+      "act_number": "24 of 2017",
+      "certified_date": "2017-10-24",
+      "operative_from": "2018-04-01",
+      "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No_24_2017_E.pdf",
+      "filename": "IRA_24_2017_E.pdf",
+      "relevance": "Principal Act: First Schedule para 1 (individual rates), Fifth Schedule para 2(a) (personal relief)"
+    },
+    {
+      "document_id": "DOC-IRA-AMEND-10-2021",
+      "title": "Inland Revenue (Amendment) Act, No. 10 of 2021",
+      "document_type": "amendment_act",
+      "act_number": "10 of 2021",
+      "certified_date": "2021-05-13",
+      "operative_from": "2020-01-01",
+      "url": "https://documents.gov.lk/view/acts/2021/5/10-2021_E.pdf",
+      "filename": "IRA_AMEND_10_2021_E.pdf",
+      "relevance": "s.51 individual rates from 2020-01-01; s.55 personal relief Rs. 3,000,000 from 2020-01-01 (enacted retrospectively)"
+    },
+    {
+      "document_id": "DOC-IRA-AMEND-45-2022",
+      "title": "Inland Revenue (Amendment) Act, No. 45 of 2022",
+      "document_type": "amendment_act",
+      "act_number": "45 of 2022",
+      "certified_date": "2022-12-19",
+      "operative_from": "2022-04-01",
+      "url": "https://documents.gov.lk/view/acts/2022/12/45-2022_E.pdf",
+      "filename": "IRA_AMEND_45_2022_E.pdf",
+      "relevance": "s.33 individual rates (YoA 2022/23 split, from YoA 2023/24); s.36 personal relief Rs. 1,200,000"
+    },
+    {
+      "document_id": "DOC-IRA-AMEND-02-2025",
+      "title": "Inland Revenue (Amendment) Act, No. 2 of 2025",
+      "document_type": "amendment_act",
+      "act_number": "2 of 2025",
+      "certified_date": "2025-03-20",
+      "operative_from": "2025-04-01",
+      "url": "https://documents.gov.lk/view/acts/2025/3/02-2025_E.pdf",
+      "filename": "IRA_AMEND_02_2025_E.pdf",
+      "relevance": "s.3 individual rates from YoA 2025/26; s.5 personal relief Rs. 1,800,000"
+    }
+  ]
+}

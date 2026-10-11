@@ -19,7 +19,7 @@ dependencies = [
 ingest = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",
-    "pymupdf>=1.24",
+    "pymupdf>=1.24.10",
 ]
 nlp = [
     "spacy>=3.7",

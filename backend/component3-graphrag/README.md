@@ -26,7 +26,8 @@ The models also enforce rules JSON Schema cannot express:
 | Part | Folder | Status |
 |---|---|---|
 | Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
-| Data acquisition | `data_collection/` | ⏳ Phase 1 |
+| Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (4 Acts; parser tuned on real PDFs next) |
+| Ground truth (rule versions) | `ground_truth/` | ✅ personal relief V1–V4, tax bands B1–B4 (B1 steps pending check) |
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ⏳ Phase 2 |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ⏳ Phase 3 (connection helper ready) |
 | Vector store (ChromaDB) | `vector_store/` | ⏳ Phase 4 |
@@ -41,13 +42,22 @@ cd backend/component3-graphrag
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 pip install -e ..\..\contracts        # shared contract models (macOS/Linux: ../../contracts)
-pip install -e ".[dev,api,graph]"
+pip install -e ".[dev,api,graph,ingest]"
 
 copy .env.example .env            # macOS/Linux: cp .env.example .env  — then set NEO4J_PASSWORD
 
-pytest                            # contract, model and API tests
+pytest                            # contract, model, API, data collection and parser tests
 ruff check .                      # lint
 ```
+
+**Phase 1: collect and parse the corpus**
+```bash
+python -m data_collection.download     # 4 official Acts -> raw_regulatory_docs/ + manifest.csv
+python -m data_collection.parse        # -> data/processed/<document_id>.json (sections, schedules)
+python -m data_collection.inspect_pdf raw_regulatory_docs/IRA_AMEND_02_2025_E.pdf   # layout check
+```
+If a site blocks the script, download the PDF in a browser and run
+`python -m data_collection.download --register <DOC_ID> <path-to-pdf>`.
 
 **Start Neo4j and check the connection**
 ```bash

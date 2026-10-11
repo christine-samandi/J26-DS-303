@@ -34,6 +34,7 @@ class Settings:
     neo4j_password: str
     chroma_dir: Path
     raw_docs_dir: Path
+    processed_dir: Path
     contracts_dir: Path
 
 
@@ -47,5 +48,6 @@ def get_settings() -> Settings:
         neo4j_password=os.getenv("NEO4J_PASSWORD", ""),
         chroma_dir=Path(os.getenv("C3_CHROMA_DIR", COMPONENT_DIR / ".chroma")),
         raw_docs_dir=Path(os.getenv("C3_RAW_DOCS_DIR", COMPONENT_DIR / "raw_regulatory_docs")),
+        processed_dir=Path(os.getenv("C3_PROCESSED_DIR", COMPONENT_DIR / "data" / "processed")),
         contracts_dir=_find_contracts_dir(),
     )
