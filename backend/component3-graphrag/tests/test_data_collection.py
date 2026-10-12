@@ -42,14 +42,30 @@ def _all_ok(content: bytes = FAKE_PDF) -> FakeSession:
 # --- registry -----------------------------------------------------------------------------
 
 
-def test_registry_has_the_four_pp1_documents():
+def test_registry_has_the_full_act_series_in_order():
     ids = [d.document_id for d in load_registry().documents]
     assert ids == [
         "DOC-IRA-2017",
         "DOC-IRA-AMEND-10-2021",
         "DOC-IRA-AMEND-45-2022",
+        "DOC-IRA-AMEND-04-2023",
+        "DOC-IRA-AMEND-14-2023",
         "DOC-IRA-AMEND-02-2025",
+        "DOC-IRA-AMEND-11-2026",
     ]
+    dates = [d.certified_date for d in load_registry().documents]
+    assert dates == sorted(dates)
+
+
+def test_all_documents_come_from_the_ird_website():
+    assert all(d.url.startswith("https://www.ird.gov.lk/") for d in load_registry().documents)
+
+
+def test_operative_date_may_be_unknown(tmp_path):
+    doc = load_registry().get("DOC-IRA-AMEND-11-2026")
+    assert doc.operative_from is None
+    dl.download_all(tmp_path, only=doc.document_id, session=_all_ok())
+    assert read_manifest(tmp_path)[doc.document_id].operative_from == ""
 
 
 def test_registry_retrospective_act_is_recorded():
@@ -65,9 +81,10 @@ def test_registry_retrospective_act_is_recorded():
 def test_download_saves_pdfs_and_writes_manifest(tmp_path):
     session = _all_ok()
     outcomes = dl.download_all(tmp_path, session=session)
-    assert [o.status for o in outcomes] == ["new"] * 4
+    n = len(load_registry().documents)
+    assert [o.status for o in outcomes] == ["new"] * n
     rows = read_manifest(tmp_path)
-    assert len(rows) == 4
+    assert len(rows) == n
     row = rows["DOC-IRA-2017"]
     assert (tmp_path / row.filename).read_bytes() == FAKE_PDF
     assert row.sha256 == sha256_of(tmp_path / row.filename)
@@ -118,7 +135,7 @@ def test_one_failure_does_not_stop_the_rest(tmp_path):
     session.answers.pop(load_registry().get("DOC-IRA-AMEND-45-2022").url)
     outcomes = dl.download_all(tmp_path, session=session)
     assert [o.status for o in outcomes].count("failed") == 1
-    assert len(read_manifest(tmp_path)) == 3
+    assert len(read_manifest(tmp_path)) == len(load_registry().documents) - 1
 
 
 def test_register_local_fallback(tmp_path):

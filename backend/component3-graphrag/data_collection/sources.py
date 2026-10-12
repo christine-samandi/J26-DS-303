@@ -28,7 +28,7 @@ class SourceDocument(BaseModel):
     document_type: Literal["act", "amendment_act", "gazette", "circular", "notice", "guide"]
     act_number: str | None = None
     certified_date: date
-    operative_from: date
+    operative_from: date | None = None  # None: sections take effect on different dates
     url: str
     filename: FileName
     relevance: str = ""

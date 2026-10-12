@@ -26,7 +26,7 @@ The models also enforce rules JSON Schema cannot express:
 | Part | Folder | Status |
 |---|---|---|
 | Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
-| Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (4 Acts; parser tuned on real PDFs next) |
+| Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (full Act series: 2017 Act + 6 amendments; parser tuned on real PDFs next) |
 | Ground truth (rule versions) | `ground_truth/` | ✅ personal relief V1–V4, tax bands B1–B4 (B1 steps pending check) |
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ⏳ Phase 2 |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ⏳ Phase 3 (connection helper ready) |

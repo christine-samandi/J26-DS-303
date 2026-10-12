@@ -67,7 +67,7 @@ def _row(doc: SourceDocument, path: Path, method: str) -> ManifestRow:
         document_type=doc.document_type,
         act_number=doc.act_number or "",
         certified_date=doc.certified_date.isoformat(),
-        operative_from=doc.operative_from.isoformat(),
+        operative_from=doc.operative_from.isoformat() if doc.operative_from else "",
         source_url=doc.url,
         filename=doc.filename,
         sha256=sha256_of(path),

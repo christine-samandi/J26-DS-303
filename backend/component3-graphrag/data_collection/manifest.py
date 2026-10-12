@@ -22,7 +22,7 @@ class ManifestRow:
     document_type: str
     act_number: str
     certified_date: str
-    operative_from: str
+    operative_from: str  # empty when sections take effect on different dates
     source_url: str
     filename: str
     sha256: str

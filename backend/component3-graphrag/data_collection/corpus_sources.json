@@ -1,5 +1,5 @@
 {
-  "description": "C3 regulatory corpus for PP1: the Inland Revenue Act No. 24 of 2017 and the amendment Acts that changed personal relief or individual income tax rates. Checked 2026-10-11: Acts No. 4 of 2023, No. 14 of 2023 and No. 11 of 2026 do not change either, so they are excluded from the PP1 slice. All four are taken from the Inland Revenue Department's Acts page (https://www.ird.gov.lk/en/publications/sitepages/acts.aspx); documents.gov.lk /view/ links stopped working on 2026-10-12.",
+  "description": "C3 regulatory corpus: the complete Inland Revenue Act No. 24 of 2017 series as listed on the Inland Revenue Department's Acts page (https://www.ird.gov.lk/en/publications/sitepages/acts.aspx), checked 2026-10-12: the principal Act and all six amendment Acts (English). The PP1 evaluation covers two rules (personal relief; individual income tax bands), which are changed only by the 2017 Act and Amendments No. 10 of 2021, No. 45 of 2022 and No. 2 of 2025; the other amendments are in the corpus for completeness and as realistic distractors for retrieval. operative_from is null where different sections take effect on different dates.",
   "documents": [
     {
       "document_id": "DOC-IRA-2017",
@@ -35,6 +35,28 @@
       "relevance": "s.33 individual rates (YoA 2022/23 split, from YoA 2023/24); s.36 personal relief Rs. 1,200,000"
     },
     {
+      "document_id": "DOC-IRA-AMEND-04-2023",
+      "title": "Inland Revenue (Amendment) Act, No. 4 of 2023",
+      "document_type": "amendment_act",
+      "act_number": "4 of 2023",
+      "certified_date": "2023-05-08",
+      "operative_from": null,
+      "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No._04_2023_E.pdf",
+      "filename": "IRA_AMEND_04_2023_E.pdf",
+      "relevance": "Outside PP1 rules: e.g. new First Schedule para 13 (15% on dividend gains); amends paras 4 and 10"
+    },
+    {
+      "document_id": "DOC-IRA-AMEND-14-2023",
+      "title": "Inland Revenue (Amendment) Act, No. 14 of 2023",
+      "document_type": "amendment_act",
+      "act_number": "14 of 2023",
+      "certified_date": "2023-09-08",
+      "operative_from": null,
+      "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No14_2023_E.pdf",
+      "filename": "IRA_AMEND_14_2023_E.pdf",
+      "relevance": "Outside PP1 rules: repeals First Schedule para 8 (retirement and provident fund rates)"
+    },
+    {
       "document_id": "DOC-IRA-AMEND-02-2025",
       "title": "Inland Revenue (Amendment) Act, No. 2 of 2025",
       "document_type": "amendment_act",
@@ -44,6 +66,17 @@
       "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No_02-2025_E.pdf",
       "filename": "IRA_AMEND_02_2025_E.pdf",
       "relevance": "s.3 individual rates from YoA 2025/26; s.5 personal relief Rs. 1,800,000"
+    },
+    {
+      "document_id": "DOC-IRA-AMEND-11-2026",
+      "title": "Inland Revenue (Amendment) Act, No. 11 of 2026",
+      "document_type": "amendment_act",
+      "act_number": "11 of 2026",
+      "certified_date": "2026-06-03",
+      "operative_from": null,
+      "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No_11-2026_E.pdf",
+      "filename": "IRA_AMEND_11_2026_E.pdf",
+      "relevance": "Outside PP1 rules as far as checked: other First Schedule rates, Fifth Schedule para 1 (charities), TIN certificate; to verify it does not change para 1 progressive bands"
     }
   ]
 }
