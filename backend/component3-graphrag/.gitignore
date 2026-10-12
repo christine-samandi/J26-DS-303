@@ -2,4 +2,5 @@
 .chroma/
 data/processed/
 data/extracted/
+data/evaluation/
 *.log

@@ -66,6 +66,13 @@ python -m entity_recognition.extract   # data/processed -> data/extracted/<docum
 python -m entity_recognition.extract --text "Rs. 1,800,000 from April 1, 2025"   # quick check
 ```
 
+**Phase 2: measure extraction (precision / recall / F1)**
+```bash
+python -m entity_recognition.annotation  # -> ground_truth/entity_annotations.xlsx (30 chunks)
+# annotate by hand in Excel (see the Guide sheet), type "done" on each finished chunk
+python -m entity_recognition.evaluate    # scores -> data/evaluation/
+```
+
 **Start Neo4j and check the connection**
 ```bash
 docker compose up -d
