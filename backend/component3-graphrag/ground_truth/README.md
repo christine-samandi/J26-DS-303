@@ -25,11 +25,16 @@ source document (same IDs as `data_collection/corpus_sources.json`) and provisio
 - `valid_to` is the last day in force (inclusive); empty means still in force.
 - Amounts and band limits are in rupees; `upper_lkr` empty means no upper limit.
 
-## Still to verify
+## Verification
 
-| Row(s) | What | Why pending |
-|---|---|---|
-| B1, all six bands | Exact rate steps (4, 8, 12, 16, 20, 24 %) | Two sources confirm "4% to 24% on Rs. 600,000 slabs" but not each step. Check the First Schedule para 1 of the 2017 Act PDF, then set `verified` to `yes`. |
+All rows are verified against the official Act PDFs (`verified` = `yes`). B1 was checked by
+hand on 2026-10-12 against the First Schedule, paragraph 1(1) of the 2017 Act (PDF page 212,
+printed page 200): bands of Rs. 600,000 at 4, 8, 12, 16, 20 and 24 %, with fixed amounts
+Rs. 24,000 / 72,000 / 144,000 / 240,000 / 360,000, which `tests/test_ground_truth.py`
+recomputes from the bands.
 
 Acts checked and excluded (no change to these two rules): No. 4 of 2023, No. 14 of 2023,
-No. 11 of 2026.
+No. 11 of 2026. Act No. 11 of 2026 was checked on its parsed text: its section 36 changes
+First Schedule para 1(2)(a) (gains on investment assets, 10% to 15%), not the progressive
+bands in para 1(1); its sections 5 and 40 change qualifying payments (Fifth Schedule para 1),
+not personal relief (para 2).
