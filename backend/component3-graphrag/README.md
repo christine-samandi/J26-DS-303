@@ -28,7 +28,7 @@ The models also enforce rules JSON Schema cannot express:
 | Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
 | Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (full Act series: 2017 Act + 6 amendments; parser tuned on the real PDFs: 379/379 sections, all 6 schedules) |
 | Ground truth (rule versions) | `ground_truth/` | ✅ personal relief V1–V4, tax bands B1–B4 (B1 steps pending check) |
-| Entity extraction (spaCy + regex) | `entity_recognition/` | ⏳ Phase 2 |
+| Entity extraction (spaCy + regex) | `entity_recognition/` | 🔄 Phase 2: chunking + 10 entity types done; amendments, classification, evaluation next |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ⏳ Phase 3 (connection helper ready) |
 | Vector store (ChromaDB) | `vector_store/` | ⏳ Phase 4 |
 | GraphRAG retrieval | `retrieval_api/` | ⏳ Phase 4 |
@@ -58,6 +58,13 @@ python -m data_collection.inspect_pdf raw_regulatory_docs/IRA_AMEND_02_2025_E.pd
 ```
 If a site blocks the script, download the PDF in a browser and run
 `python -m data_collection.download --register <DOC_ID> <path-to-pdf>`.
+
+**Phase 2: extract tax entities (no LLM)**
+```bash
+pip install -e ".[nlp]"                # spaCy (no language model download needed)
+python -m entity_recognition.extract   # data/processed -> data/extracted/<document_id>.json
+python -m entity_recognition.extract --text "Rs. 1,800,000 from April 1, 2025"   # quick check
+```
 
 **Start Neo4j and check the connection**
 ```bash

@@ -10,6 +10,7 @@ from act_pdf_fixtures import (  # noqa: E402
     build_amendment_act,
     build_principal_act_with_schedule,
     build_real_layout_act,
+    build_ruled_rate_table,
 )
 
 from data_collection.download import register_local  # noqa: E402
@@ -238,3 +239,27 @@ def test_section_number_drawn_twice_is_read_once():
         {"text": " Section 46", "bbox": (134, 0, 200, 10)},
     ]
     assert _dedup(kept) == kept
+
+
+def test_ruled_table_is_read_row_by_row(tmp_path):
+    pages = read_pages(build_ruled_rate_table(tmp_path / "table.pdf"))
+    rows = [ln.text for ln in pages[0].lines if "|" in ln.text]
+    assert rows == [
+        "Taxable Income | Tax Payable",
+        "Not exceeding Rs. 100 | 6% of the amount in excess of Rs. 0",
+        "Exceeding Rs. 100 but not exceeding Rs. 200 | "
+        "Rs. 6 plus 12% of the amount in excess of Rs. 100",
+    ]
+
+
+def test_table_reading_can_be_switched_off(tmp_path):
+    pages = read_pages(build_ruled_rate_table(tmp_path / "table.pdf"), tables=False)
+    assert not any("|" in ln.text for ln in pages[0].lines)
+
+
+def test_reference_at_line_start_is_not_a_subsection():
+    # Act No. 11 of 2026, s.5: "... in terms of subsection" / "(1) of this section, is not possible"
+    text = "Where the deduction in terms of subsection\n(1) of this section, is not possible"
+    assert split_subsections(text) == (" ".join(text.split()), [])
+    lead, subs = split_subsections("(1) First.\n(2) of that paragraph applies.\n(2) Second.")
+    assert [s.label for s in subs] == ["1", "2"] and subs[1].text == "Second."

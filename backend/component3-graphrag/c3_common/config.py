@@ -35,6 +35,7 @@ class Settings:
     chroma_dir: Path
     raw_docs_dir: Path
     processed_dir: Path
+    extracted_dir: Path
     contracts_dir: Path
 
 
@@ -49,5 +50,6 @@ def get_settings() -> Settings:
         chroma_dir=Path(os.getenv("C3_CHROMA_DIR", COMPONENT_DIR / ".chroma")),
         raw_docs_dir=Path(os.getenv("C3_RAW_DOCS_DIR", COMPONENT_DIR / "raw_regulatory_docs")),
         processed_dir=Path(os.getenv("C3_PROCESSED_DIR", COMPONENT_DIR / "data" / "processed")),
+        extracted_dir=Path(os.getenv("C3_EXTRACTED_DIR", COMPONENT_DIR / "data" / "extracted")),
         contracts_dir=_find_contracts_dir(),
     )

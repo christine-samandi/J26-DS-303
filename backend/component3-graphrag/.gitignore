@@ -1,4 +1,5 @@
 # C3 local data (rebuildable — never commit)
 .chroma/
 data/processed/
+data/extracted/
 *.log
