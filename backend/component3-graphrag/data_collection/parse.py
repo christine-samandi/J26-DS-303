@@ -73,7 +73,7 @@ def parse_corpus(raw_dir: Path, out_dir: Path, only: str | None = None) -> list[
 
 def summarise(parsed: ParsedDocument) -> str:
     kinds = [s.kind for s in parsed.segments]
-    schedules = sorted({s.schedule for s in parsed.segments if s.schedule})
+    schedules = list(dict.fromkeys(s.schedule for s in parsed.segments if s.schedule))
     noted = sum(1 for s in parsed.segments if s.marginal_note)
     lines = [
         f"{parsed.document_id}: {parsed.page_count} pages, "

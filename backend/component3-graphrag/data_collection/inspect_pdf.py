@@ -28,13 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     pages = read_pages(args.pdf)
-    left, right = classify(pages)
-    print(f"{args.pdf.name}: {len(pages)} pages; body column x={left:.0f}..{right:.0f}")
+    sizes = classify(pages)
+    print(f"{args.pdf.name}: {len(pages)} pages")
     for number in _page_range(args.pages, len(pages)):
         if not 1 <= number <= len(pages):
             continue
         page = pages[number - 1]
-        print(f"\n--- page {number} ({page.width:.0f} x {page.height:.0f}) ---")
+        main = f"main text {sizes[number]}pt" if number in sizes else "no body text"
+        print(f"\n--- page {number} ({page.width:.0f} x {page.height:.0f}; {main}) ---")
         for ln in page.lines:
             print(
                 f"p{ln.page:<3} {ln.kind:6} x={ln.x0:5.0f} y={ln.y0:5.0f} "

@@ -1,9 +1,20 @@
 """Read a PDF page by page and sort every text line into header, footer, margin note or body.
 
-Sri Lankan Acts (documents.gov.lk / IRD) share one printed layout:
-- a running title at the top of each page and a page number at the top or bottom,
-- marginal notes (the short section titles) in the outer margin beside each section,
-- one body column of numbered sections, then the schedules.
+Sri Lankan Acts (documents.gov.lk / IRD) share one printed layout, checked against all seven
+Inland Revenue Acts in the corpus:
+- a running header on each page (page number + short title, sometimes on two lines), placed
+  well below the top edge of the paper, so headers are found as the first lines of a page that
+  repeat across pages (or are a bare page number), not by a fixed band; the same test is
+  applied to the last lines of a page, for gazettes that number pages at the foot;
+- printer codes such as "2 PL 005318-2,962 (07/2017)" at the foot of some pages;
+- marginal notes (the short section titles) beside each section, in a smaller font (8pt beside
+  10pt text), on the right of some pages and the left of others (the pages are mirrored, and
+  heavily indented pages give no reliable column edge);
+- schedules printed entirely in 8pt, the same size as the notes.
+
+So a marginal note is a line that is (a) smaller than the main text and (b) wholly left or right
+of every main-size line on its page. The main size is the Act's (10pt) on pages that carry
+it, otherwise the page's own (schedule pages: 8pt, so their table cells are never notes).
 
 This module only does the geometry. Turning body lines into sections is in `segment.py`.
 `python -m data_collection.inspect_pdf <pdf>` prints what this module decided, line by line, so
@@ -18,14 +29,15 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Tunable thresholds (fractions of page height / width)
-HEADER_BAND = 0.08  # top 8% of the page
-FOOTER_BAND = 0.08  # bottom 8%
-REPEAT_SHARE = 0.3  # a header/footer text appears on >= 30% of pages
-SAME_ROW_TOL = 2.5  # points: lines this close vertically are one visual row
+# Tunable thresholds (points, or fractions of page size / page count)
+HEADER_ZONE = 16.0  # lines starting within this distance of a page's first line may be header
+REPEAT_SHARE = 0.2  # a header text (digits masked) appears on >= 20% of pages
+SAME_ROW_TOL = 2.5  # lines this close vertically are one visual row
+NOTE_SMALLER = 1.0  # a note's font is at least this much smaller than the main text
 
 _PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?\d{1,4}\s*$", re.IGNORECASE)
 _NUMBER_TOKEN = re.compile(r"^\s*(?:\d{1,3}[A-Z]?\.|\(\d{1,2}[A-Z]?\)|\([a-z]{1,4}\))\s*$")
+_PRINTER_CODE = re.compile(r"\bPL\s*\d{3,}")  # "2 PL 005318—–2,962 (07/2017)"
 
 
 @dataclass
@@ -68,7 +80,7 @@ def read_pages(pdf_path: Path) -> list[Page]:
                 if block.get("type") != 0:
                     continue
                 for ln in block["lines"]:
-                    text = "".join(span["text"] for span in ln["spans"])
+                    text = "".join(span["text"] for span in _dedup(ln["spans"]))
                     if not text.strip():
                         continue
                     size = max(span["size"] for span in ln["spans"])
@@ -79,49 +91,97 @@ def read_pages(pdf_path: Path) -> list[Page]:
     return pages
 
 
-def _body_column(pages: list[Page]) -> tuple[float, float]:
-    """Left and right edges of the main text column, from the wide lines."""
-    wide = [ln for p in pages for ln in p.lines if ln.width > 0.4 * p.width]
-    if not wide:
-        all_lines = [ln for p in pages for ln in p.lines]
-        return min(ln.x0 for ln in all_lines), max(ln.x1 for ln in all_lines)
-    left = Counter(round(ln.x0 / 5) * 5 for ln in wide).most_common(1)[0][0]
-    rights = sorted(ln.x1 for ln in wide)
-    right = rights[int(0.95 * (len(rights) - 1))]
-    return float(left), float(right)
+def _dedup(spans: list[dict]) -> list[dict]:
+    """Drop a span that the next span repeats at the same position.
+
+    Some PDFs draw the section number twice ("5." then "5. Section 52 ..." at the same x),
+    which would otherwise read as "5.5. Section 52".
+    """
+    kept = []
+    for i, span in enumerate(spans):
+        nxt = spans[i + 1] if i + 1 < len(spans) else None
+        if (
+            nxt is not None
+            and span["text"].strip()
+            and abs(nxt["bbox"][0] - span["bbox"][0]) < 1.0
+            and nxt["text"].startswith(span["text"])
+        ):
+            continue
+        kept.append(span)
+    return kept
 
 
-def classify(pages: list[Page]) -> tuple[float, float]:
-    """Mark each line's kind in place. Returns the body column (left, right)."""
-    # 1. running headers / footers: repeated text in the top or bottom band, and page numbers
-    band_texts: Counter[str] = Counter()
-    for p in pages:
-        seen = set()
-        for ln in p.lines:
-            if ln.y1 <= HEADER_BAND * p.height or ln.y0 >= (1 - FOOTER_BAND) * p.height:
-                seen.add(_norm_repeat(ln.text))
-        band_texts.update(seen)
+def _top_lines(page: Page) -> list[Line]:
+    if not page.lines:
+        return []
+    first = min(ln.y0 for ln in page.lines)
+    return [ln for ln in page.lines if ln.y0 <= first + HEADER_ZONE]
+
+
+def _bottom_lines(page: Page) -> list[Line]:
+    if not page.lines:
+        return []
+    last = max(ln.y0 for ln in page.lines)
+    return [ln for ln in page.lines if ln.y0 >= last - HEADER_ZONE]
+
+
+def _is_header_text(text: str, repeated: set[str]) -> bool:
+    if _PAGE_NUMBER.match(text):
+        return True
+    norm = _norm_repeat(text)
+    return norm in repeated and len(norm) >= 6 and any(c.isalpha() for c in norm)
+
+
+def classify(pages: list[Page]) -> dict[int, float]:
+    """Mark each line's kind in place. Returns the main text font size of each page."""
+    # 1. running headers/footers: page numbers, and text repeated at the top (or bottom) of
+    #    many pages; printer codes anywhere
     min_repeats = max(2, int(REPEAT_SHARE * len(pages)))
-    repeated = {t for t, n in band_texts.items() if n >= min_repeats}
-
+    for edge, kind in ((_top_lines, "header"), (_bottom_lines, "footer")):
+        seen: Counter[str] = Counter()
+        for p in pages:
+            seen.update({_norm_repeat(ln.text) for ln in edge(p)})
+        repeated = {t for t, n in seen.items() if n >= min_repeats}
+        for p in pages:
+            for ln in edge(p):
+                if ln.kind == "body" and _is_header_text(ln.text, repeated):
+                    ln.kind = kind
     for p in pages:
         for ln in p.lines:
-            in_top = ln.y1 <= HEADER_BAND * p.height
-            in_bottom = ln.y0 >= (1 - FOOTER_BAND) * p.height
-            if (in_top or in_bottom) and (
-                _PAGE_NUMBER.match(ln.text) or _norm_repeat(ln.text) in repeated
-            ):
-                ln.kind = "header" if in_top else "footer"
+            if _PRINTER_CODE.search(ln.text):
+                ln.kind = "footer"
 
-    # 2. marginal notes: outside the body column, and not a hanging "52." or "(1)" number
-    left, right = _body_column(pages)
+    # 2. marginal notes: smaller than the main text, and wholly outside the span of the
+    #    main-size text on their page (main text never sits in the margin; table cells do not
+    #    sit outside the column)
+    doc_main = _main_size([ln for p in pages for ln in p.lines if ln.kind == "body"])
+    sizes: dict[int, float] = {}
     for p in pages:
-        for ln in p.lines:
-            if ln.kind != "body" or _NUMBER_TOKEN.match(ln.text):
+        body = [ln for ln in p.lines if ln.kind == "body"]
+        if not body:
+            continue
+        at_doc_main = [ln for ln in body if abs(ln.size - doc_main) <= 0.5]
+        carries_doc_main = len(at_doc_main) >= 2 and (
+            max(ln.x1 for ln in at_doc_main) - min(ln.x0 for ln in at_doc_main) >= 0.4 * p.width
+        )
+        main = sizes[p.number] = doc_main if carries_doc_main else _main_size(body)
+        mains = [ln for ln in body if ln.size >= main - 0.5]
+        left = min(ln.x0 for ln in mains)
+        right = max(ln.x1 for ln in mains)
+        for ln in body:
+            if ln.size > main - NOTE_SMALLER or _NUMBER_TOKEN.match(ln.text):
                 continue
-            if ln.x0 >= right - 2 or ln.x1 <= left + 2:
+            if ln.x1 <= left + 2 or ln.x0 >= right - 2:
                 ln.kind = "margin"
-    return left, right
+    return sizes
+
+
+def _main_size(lines: list[Line]) -> float:
+    """The font size carrying the most characters."""
+    weight: Counter[float] = Counter()
+    for ln in lines:
+        weight[round(ln.size * 2) / 2] += len(ln.text)
+    return weight.most_common(1)[0][0] if weight else 0.0
 
 
 @dataclass
@@ -131,6 +191,7 @@ class BodyRow:
     page: int
     y0: float
     text: str
+    size: float = 0.0
 
 
 @dataclass
@@ -157,7 +218,12 @@ def body_rows(pages: list[Page]) -> list[BodyRow]:
 
 def _merge(lines: list[Line]) -> BodyRow:
     lines = sorted(lines, key=lambda ln: ln.x0)
-    return BodyRow(lines[0].page, min(ln.y0 for ln in lines), " ".join(ln.text for ln in lines))
+    return BodyRow(
+        lines[0].page,
+        min(ln.y0 for ln in lines),
+        " ".join(ln.text for ln in lines),
+        max(ln.size for ln in lines),
+    )
 
 
 def margin_notes(pages: list[Page]) -> list[MarginNote]:
@@ -166,7 +232,7 @@ def margin_notes(pages: list[Page]) -> list[MarginNote]:
     for p in pages:
         group: list[Line] = []
         margin = [ln for ln in p.lines if ln.kind == "margin"]
-        gap = statistics.median([ln.y1 - ln.y0 for ln in margin]) * 1.6 if margin else 0
+        gap = statistics.median([ln.y1 - ln.y0 for ln in margin]) * 0.5 if margin else 0
         for ln in margin:
             if group and ln.y0 - group[-1].y1 > gap:
                 notes.append(_note(group))
@@ -179,5 +245,6 @@ def margin_notes(pages: list[Page]) -> list[MarginNote]:
 
 def _note(lines: list[Line]) -> MarginNote:
     text = " ".join(ln.text for ln in lines)
-    text = re.sub(r"(\w)- (\w)", r"\1\2", text)  # re-join words hyphenated across note lines
+    text = re.sub(r"(\w)- ([A-Z])", r"\1-\2", text)  # "Non- Governmental" -> "Non-Governmental"
+    text = re.sub(r"(\w)- ([a-z])", r"\1\2", text)  # re-join "speci- fied", keep "Non-Governmental"
     return MarginNote(lines[0].page, lines[0].y0, lines[-1].y1, " ".join(text.split()))

@@ -4,6 +4,11 @@ Input: body rows and margin notes from `layout.py`. Output: a ParsedDocument who
 carry their number, schedule, page range, marginal note, text and subsections. These segments
 are the units Phase 2 extracts entities from and Phase 4 embeds for vector search.
 
+The enacted text starts at the enacting formula ("BE it enacted by the Parliament ..."). The
+cover page and the table of contents ("ARRANGEMENT OF SECTIONS") come before it: they are used
+to detect the title and date, but are not cut into sections, because every table-of-contents
+line ("1. Short title ...") looks exactly like a section start.
+
 Section numbers must run in order (1, 2, 3 ... with 52A after 52). A line that looks like a
 section start but breaks the order (e.g. "2025. The amount ...") is treated as ordinary text.
 That one rule removes most false splits without any document-specific patterns.
@@ -20,7 +25,14 @@ from data_collection.layout import BodyRow, MarginNote
 MAX_SECTION_JUMP = 6  # repealed sections leave small gaps in numbering
 
 _ORDINALS = "FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH"
-_SCHEDULE = re.compile(rf"^\s*({_ORDINALS})\s+SCHEDULE\b\s*(?:\[[^\]]*\])?\s*[.:]?\s*$")
+_SCHEDULE = re.compile(
+    rf"^\s*({_ORDINALS})\s+SCHEDULE\b\s*(?:[\[(][^\])]*[\])])?\s*[.:]?\s*$"
+)  # "FIFTH SCHEDULE", "FIRST SCHEDULE (Section 2)", "SIXTH SCHEDULE [Section 200]"
+_SCHEDULE_REF = re.compile(r"^\s*[\[(]\s*Sections?\s[^\])]*[\])]\s*$")  # "(Section 9)"
+_PART = re.compile(r"^PART\s+[IVXLC]+$")
+_CHAPTER = re.compile(r"^CHAPTER\s+[IVXLC]+$")
+_DIVISION = re.compile(r"^Division\s+[IVXLC]+\s*:\s*\S.*$")
+_ENACTING = re.compile(r"^\s*BE\s+it\s+enacted\b", re.IGNORECASE)
 _SECTION = re.compile(r"^(?P<num>\d{1,3})(?P<suffix>[A-Z]{0,2})\.\s+(?P<rest>[(\"“A-Z].*)$")
 _SUBSECTION = re.compile(r"(?:^|\n)\((?P<num>\d{1,2})(?P<suffix>[A-Z]{0,2})\)\s+")
 _CERTIFIED = re.compile(
@@ -39,10 +51,13 @@ class Subsection:
 @dataclass
 class Segment:
     segment_id: str
-    kind: str  # preamble | section | schedule_paragraph
+    kind: str  # preamble | section | schedule_text | schedule_paragraph
     number: str | None
     schedule: str | None  # e.g. "FIFTH SCHEDULE"
     marginal_note: str | None
+    heading: (
+        str | None
+    )  # place in the Act, e.g. "PART I > CHAPTER V TYPES OF PERSONS > Division I: ..."
     page_start: int
     page_end: int
     text: str
@@ -144,10 +159,41 @@ def detect_certified_date(text: str) -> str | None:
 
 
 def detect_title(rows: list[BodyRow]) -> str | None:
-    for row in rows[:40]:
-        if _TITLE.match(row.text.strip()):
-            return _flat(row.text)
+    """The Act's title from the cover page, joining a title printed over two lines
+    ("INLAND REVENUE (AMENDMENT)" / "ACT, No. 2 OF 2025")."""
+    for i, row in enumerate(rows[:40]):
+        if not _TITLE.match(row.text.strip()):
+            continue
+        parts = [row.text]
+        j = i - 1
+        while (
+            j >= 0
+            and rows[j].page == row.page
+            and abs(rows[j].size - row.size) <= 1.5
+            and rows[j].text.isupper()
+            and not _TITLE.match(rows[j].text.strip())
+            and not re.search(r"PARLIAMENT|REPUBLIC|SRI\s+LANKA", rows[j].text)
+        ):
+            parts.insert(0, rows[j].text)
+            j -= 1
+        return _flat(" ".join(parts))
     return None
+
+
+def body_start(rows: list[BodyRow]) -> int:
+    """Index of the first row of the enacted text (its long title), or 0 if not found.
+
+    The long title sits just above "BE it enacted", after the "[Certified on ...]" line
+    repeated on the first page of the Act's text.
+    """
+    enact = next((i for i, r in enumerate(rows) if _ENACTING.match(r.text)), None)
+    if enact is None:
+        return 0
+    certified = [i for i in range(enact) if _CERTIFIED.search(rows[i].text)]
+    start = certified[-1] + 1 if certified else enact
+    while start > 0 and rows[start - 1].page == rows[enact].page and not certified:
+        start -= 1
+    return start
 
 
 # --- segmentation -------------------------------------------------------------------------
@@ -170,6 +216,12 @@ def segment(
     prev: tuple[int, str] | None = None
     current: dict | None = None
     preamble_rows: list[BodyRow] = []
+    place: dict[str, str | None] = {"part": None, "chapter": None, "division": None}
+    chapter_title_next = False  # the row after "CHAPTER V" is its title
+    division_more = False  # a Division title may wrap onto one more short row
+    start = body_start(rows)
+    if start == 0 and not any(_ENACTING.match(r.text) for r in rows):
+        warnings.append("enacting formula ('BE it enacted') not found: front matter not skipped")
 
     def close() -> None:
         if current is None:
@@ -179,18 +231,24 @@ def segment(
         number = current["number"]
         if current["schedule"]:
             sched_no = _ORDINALS.split("|").index(current["schedule"].split()[0]) + 1
-            seg_id = f"SEG-{short}-SCH{sched_no}-P{int(re.sub(r'[A-Z]', '', number)):03d}"
-            seg_id += re.sub(r"\d", "", number)
+            seg_id = f"SEG-{short}-SCH{sched_no}"
+            if number is None:  # heading and text before the first numbered paragraph
+                kind = "schedule_text"
+            else:
+                kind = "schedule_paragraph"
+                seg_id += f"-P{int(re.sub(r'[A-Z]', '', number)):03d}" + re.sub(r"\d", "", number)
         else:
+            kind = "section"
             seg_id = f"SEG-{short}-S{int(re.sub(r'[A-Z]', '', number)):03d}"
             seg_id += re.sub(r"\d", "", number)
         segments.append(
             Segment(
                 segment_id=seg_id,
-                kind="schedule_paragraph" if current["schedule"] else "section",
+                kind=kind,
                 number=number,
                 schedule=current["schedule"],
-                marginal_note=_note_for(notes, current["rows_meta"][0]),
+                marginal_note=_note_for(notes, current["rows_meta"][0]) if number else None,
+                heading=current.get("heading"),
                 page_start=current["rows_meta"][0].page,
                 page_end=current["rows_meta"][-1].page,
                 text=lead if subs else _flat(body),
@@ -198,13 +256,48 @@ def segment(
             )
         )
 
-    for row in rows:
+    for row in rows[start:]:
         text = row.text.strip()
-        sched = _SCHEDULE.match(text.upper()) if text.isupper() or "SCHEDULE" in text else None
-        if sched and text == text.upper():
+
+        # Part / Chapter / Division headings: recorded as the place of the next sections,
+        # not appended to the text of the section before them
+        if schedule is None:
+            if chapter_title_next and text.split()[0].isupper() and not _SECTION.match(text):
+                place["chapter"] = f"{place['chapter']} {' '.join(text.split())}"
+                chapter_title_next = False
+                continue
+            chapter_title_next = False
+            if (
+                division_more
+                and len(text) <= 60
+                and not _SECTION.match(text)
+                and text[-1] not in ".;:"
+            ):
+                place["division"] = f"{place['division']} {text}"
+                division_more = False
+                continue
+            division_more = False
+            if _PART.match(text):
+                place = {"part": text, "chapter": None, "division": None}
+                continue
+            if _CHAPTER.match(text):
+                place["chapter"], place["division"] = text, None
+                chapter_title_next = True
+                continue
+            if _DIVISION.match(text):
+                place["division"] = " ".join(text.split())
+                division_more = True
+                continue
+
+        sched = _SCHEDULE.match(text)
+        if sched:
+            heading = [text]
+            if current and len(current["rows"]) > 1 and _SCHEDULE_REF.match(current["rows"][-1]):
+                heading.insert(0, current["rows"].pop())  # "(Section 9)" printed above
+                current["rows_meta"].pop()
             close()
-            current = None
             schedule = f"{sched[1].upper()} SCHEDULE"
+            current = {"number": None, "schedule": schedule, "rows": heading, "rows_meta": [row]}
             prev = None
             continue
 
@@ -217,6 +310,7 @@ def segment(
                 "schedule": schedule,
                 "rows": [m["rest"]],
                 "rows_meta": [row],
+                "heading": None if schedule else " > ".join(v for v in place.values() if v) or None,
             }
             continue
 
@@ -236,6 +330,7 @@ def segment(
                 number=None,
                 schedule=None,
                 marginal_note=None,
+                heading=None,
                 page_start=preamble_rows[0].page,
                 page_end=preamble_rows[-1].page,
                 text=join_rows([r.text for r in preamble_rows]),

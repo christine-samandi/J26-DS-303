@@ -6,10 +6,14 @@ import pytest
 
 pytest.importorskip("pymupdf")
 
-from act_pdf_fixtures import build_amendment_act, build_principal_act_with_schedule  # noqa: E402
+from act_pdf_fixtures import (  # noqa: E402
+    build_amendment_act,
+    build_principal_act_with_schedule,
+    build_real_layout_act,
+)
 
 from data_collection.download import register_local  # noqa: E402
-from data_collection.layout import classify, read_pages  # noqa: E402
+from data_collection.layout import _dedup, classify, read_pages  # noqa: E402
 from data_collection.parse import parse_corpus, parse_pdf  # noqa: E402
 from data_collection.segment import join_rows, split_subsections  # noqa: E402
 
@@ -152,3 +156,85 @@ def test_registry_mismatch_is_warned(tmp_path):
     [parsed] = parse_corpus(raw, out)
     assert any("certified date" in w for w in parsed.warnings)
     assert any("does not match Act No. 45 of 2022" in w for w in parsed.warnings)
+
+
+# --- the real printed layout (mirrored pages, table of contents, 8pt schedules) -----------
+
+
+@pytest.fixture(scope="module")
+def real(tmp_path_factory):
+    path = build_real_layout_act(tmp_path_factory.mktemp("pdf") / "real.pdf")
+    return parse_pdf(path, "DOC-TEST-7-2030")
+
+
+def test_table_of_contents_is_not_cut_into_sections(real):
+    s1 = _seg(real, "SEG-TEST-7-2030-S001")
+    assert s1.text.startswith("This Act may be cited") and s1.page_start == 3
+    assert [s.number for s in real.segments if s.kind == "section"] == ["1", "2", "3", "4"]
+    assert "ARRANGEMENT OF SECTIONS" not in " ".join(s.text for s in real.segments)
+
+
+def test_two_line_title_in_different_font_sizes(real):
+    assert real.title_detected == "TEST REVENUE (AMENDMENT) ACT, No. 7 OF 2030"
+    assert real.certified_date_detected == "2030-05-05"
+
+
+def test_notes_found_on_both_sides_of_mirrored_pages(real):
+    notes = {s.number: s.marginal_note for s in real.segments if s.kind == "section"}
+    assert notes == {
+        "1": "Short title.",  # odd page, right margin
+        "2": "Charging provision.",
+        "3": "Non-Governmental test bodies.",  # even page, left margin; hyphen kept before capital
+        "4": "Interpretation.",
+    }
+
+
+def test_running_header_and_printer_code_are_not_text(tmp_path):
+    pages = read_pages(build_real_layout_act(tmp_path / "real.pdf"))
+    classify(pages)
+    kinds = {}
+    for p in pages:
+        for ln in p.lines:
+            kinds.setdefault(ln.text, set()).add(ln.kind)
+    assert kinds["Test Revenue Act, No. 7 of 2030"] == {"header"}  # at y=167 on every page
+    assert kinds["1 PL 001234-1,000 (01/2030)"] == {"footer"}
+
+
+def test_part_chapter_division_become_the_heading(real):
+    s1 = _seg(real, "SEG-TEST-7-2030-S001")
+    assert (
+        s1.heading
+        == "PART I > CHAPTER I IMPOSITION OF TEST TAX > Division I: Test Income and Test Gains"
+    )
+    text = " ".join(s.text for s in real.segments)
+    assert "CHAPTER I" not in text and "Test Gains" not in text
+
+
+def test_schedule_heading_with_section_reference_and_rate_table(real):
+    intro = _seg(real, "SEG-TEST-7-2030-SCH1")
+    assert intro.kind == "schedule_text" and intro.text == "FIRST SCHEDULE (Section 2) TAX RATES"
+    p1 = _seg(real, "SEG-TEST-7-2030-SCH1-P001")
+    rates = p1.subsections[0].text
+    assert "Not exceeding Rs. 100 6% of the amount" in rates  # 8pt table cells are not notes
+    assert _seg(real, "SEG-TEST-7-2030-SCH1-P002").page_start == 5
+
+
+def test_schedule_without_numbered_paragraphs_is_kept(real):
+    third = _seg(real, "SEG-TEST-7-2030-SCH3")
+    assert third.kind == "schedule_text"
+    assert third.text.startswith("(Section 9) THIRD SCHEDULE The following shall be exempt")
+    assert "(b) amounts derived by a test fund." in third.text
+    assert "(Section 9)" not in _seg(real, "SEG-TEST-7-2030-SCH1-P002").text
+
+
+def test_section_number_drawn_twice_is_read_once():
+    spans = [
+        {"text": "5.", "bbox": (126.5, 0, 134, 10)},
+        {"text": "5. Section 52 of the principal enactment", "bbox": (126.5, 0, 300, 10)},
+    ]
+    assert "".join(s["text"] for s in _dedup(spans)) == "5. Section 52 of the principal enactment"
+    kept = [
+        {"text": "4.", "bbox": (126.5, 0, 134, 10)},
+        {"text": " Section 46", "bbox": (134, 0, 200, 10)},
+    ]
+    assert _dedup(kept) == kept
