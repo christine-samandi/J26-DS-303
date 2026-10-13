@@ -12,9 +12,23 @@ changes if the hand calculation itself was wrong, and that change needs a second
 ```
 eval/
   scenarios/GS-NNN_<slug>.json   one scenario per file
+  run_engine.py                  engine calculation accuracy (target 100%)
+  results/                       run outputs, git-ignored
 ```
 
-Metric scripts (`run_engine.py`, `run_baseline_llm.py`, ...) will be added here.
+More metric scripts (`run_baseline_llm.py`, `run_explanations.py`, ...) will be added here.
+
+## Running
+
+From the repo root, with the C1 package installed (`pip install -e backend/component1-orchestrator`):
+
+```bash
+python eval/run_engine.py
+```
+
+Writes `results/engine_<UTC time>_<git sha>.csv` and `.md`. A `-dirty` suffix on the SHA
+means there were uncommitted changes, so don't report numbers from a dirty run. Only
+`verified` scenarios count towards accuracy. The script exits 1 if any of them fails.
 
 ## Scenario format
 
