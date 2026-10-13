@@ -1,0 +1,36 @@
+{
+  "scenario_id": "GS-002",
+  "title": "Employment income below personal relief, no tax",
+  "tags": ["employment_income", "zero_tax", "below_relief"],
+  "year_of_assessment": "2025/26",
+  "input": {
+    "employment_income": 1500000,
+    "apit_paid": 0
+  },
+  "expected": {
+    "taxable_income": 0,
+    "total_tax": 0,
+    "tax_payable": 0,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 0, "cites": ["personal_relief"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 0, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 0, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 0, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,800,000",
+    "Taxable income = max(0, 1,500,000 - 1,800,000) = 0",
+    "No band reached",
+    "Total tax = 0",
+    "APIT credit = 0",
+    "Tax payable = 0 - 0 = 0"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-14"}],
+    "notes": "Drafted from the YA 2025/26 seed rules; hand-checked."
+  }
+}

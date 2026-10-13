@@ -1,0 +1,45 @@
+{
+  "scenario_id": "GS-010",
+  "title": "High employment income well into the 36% band, APIT underpaid",
+  "tags": ["employment_income", "band_5", "high_income", "payable"],
+  "year_of_assessment": "2025/26",
+  "input": {
+    "employment_income": 12000000,
+    "apit_paid": 3000000
+  },
+  "expected": {
+    "taxable_income": 10200000,
+    "total_tax": 3192000,
+    "tax_payable": 192000,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 10200000, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_2", "result": 90000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_3", "result": 120000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_4", "result": 150000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_5", "result": 2772000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 3192000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 3000000, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 192000, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,800,000",
+    "Taxable income = 12,000,000 - 1,800,000 = 10,200,000",
+    "Band 1: first 1,000,000 x 6% = 60,000",
+    "Band 2: next 500,000 x 18% = 90,000",
+    "Band 3: next 500,000 x 24% = 120,000",
+    "Band 4: next 500,000 x 30% = 150,000",
+    "Band 5: balance 7,700,000 (2,500,000 to 10,200,000) x 36% = 2,772,000",
+    "Total tax = 60,000 + 90,000 + 120,000 + 150,000 + 2,772,000 = 3,192,000",
+    "APIT credit = 3,000,000",
+    "Tax payable = 3,192,000 - 3,000,000 = 192,000"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-14"}],
+    "notes": "Drafted from the YA 2025/26 seed rules; hand-checked."
+  }
+}

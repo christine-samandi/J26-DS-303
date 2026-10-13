@@ -1,0 +1,38 @@
+{
+  "scenario_id": "GS-004",
+  "title": "Taxable income exactly at the top of the 6% band, APIT exactly covers the tax",
+  "tags": ["employment_income", "band_1", "band_edge", "apit_exact"],
+  "year_of_assessment": "2025/26",
+  "input": {
+    "employment_income": 2800000,
+    "apit_paid": 60000
+  },
+  "expected": {
+    "taxable_income": 1000000,
+    "total_tax": 60000,
+    "tax_payable": 0,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 1000000, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 60000, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 0, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,800,000",
+    "Taxable income = 2,800,000 - 1,800,000 = 1,000,000",
+    "Band 1: first 1,000,000 x 6% = 60,000",
+    "Band 2 not reached (taxable income is not above 1,000,000)",
+    "Total tax = 60,000",
+    "APIT credit = 60,000",
+    "Tax payable = 60,000 - 60,000 = 0"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-14"}],
+    "notes": "Drafted from the YA 2025/26 seed rules; hand-checked."
+  }
+}

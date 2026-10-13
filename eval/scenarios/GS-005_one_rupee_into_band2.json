@@ -1,0 +1,39 @@
+{
+  "scenario_id": "GS-005",
+  "title": "Taxable income one rupee into the 18% band (cent rounding)",
+  "tags": ["employment_income", "band_2", "band_edge", "rounding", "payable"],
+  "year_of_assessment": "2025/26",
+  "input": {
+    "employment_income": 2800001,
+    "apit_paid": 0
+  },
+  "expected": {
+    "taxable_income": 1000001,
+    "total_tax": 60000.18,
+    "tax_payable": 60000.18,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 1000001, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_2", "result": 0.18, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 60000.18, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 0, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 60000.18, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,800,000",
+    "Taxable income = 2,800,001 - 1,800,000 = 1,000,001",
+    "Band 1: first 1,000,000 x 6% = 60,000",
+    "Band 2: next 1 x 18% = 0.18",
+    "Total tax = 60,000 + 0.18 = 60,000.18",
+    "APIT credit = 0",
+    "Tax payable = 60,000.18 - 0 = 60,000.18"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-14"}],
+    "notes": "Drafted from the YA 2025/26 seed rules; hand-checked."
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "scenario_id": "GS-007",
+  "title": "Taxable income exactly at the top of the 24% band, APIT overpaid",
+  "tags": ["employment_income", "band_3", "band_edge", "refund"],
+  "year_of_assessment": "2025/26",
+  "input": {
+    "employment_income": 3800000,
+    "apit_paid": 300000
+  },
+  "expected": {
+    "taxable_income": 2000000,
+    "total_tax": 270000,
+    "tax_payable": 0,
+    "refund": 30000,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 2000000, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_2", "result": 90000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_3", "result": 120000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 270000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 300000, "cites": []},
+      {"step_id": "S6_REFUND", "result": 30000, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,800,000",
+    "Taxable income = 3,800,000 - 1,800,000 = 2,000,000",
+    "Band 1: first 1,000,000 x 6% = 60,000",
+    "Band 2: next 500,000 x 18% = 90,000",
+    "Band 3: next 500,000 (1,500,000 to 2,000,000) x 24% = 120,000",
+    "Total tax = 60,000 + 90,000 + 120,000 = 270,000",
+    "APIT credit = 300,000",
+    "Refund = 300,000 - 270,000 = 30,000"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-14"}],
+    "notes": "Drafted from the YA 2025/26 seed rules; hand-checked."
+  }
+}
