@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 # Install it first: pip install -e ../../contracts
 dependencies = [
     "j26-contracts>=1.0.0",
+    # Pinned: only orchestrator/graph.py imports it, so an upgrade is a one-file review.
+    "langgraph==1.2.15",
     "pydantic>=2.11",
     "pyyaml>=6.0",
 ]
@@ -29,10 +31,11 @@ llm = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["tax_calculation_agent*"]
+include = ["tax_calculation_agent*", "orchestrator*"]
 
 [tool.setuptools.package-data]
 tax_calculation_agent = ["rules/*.yaml"]
+orchestrator = ["mock_data/*.json", "mock_data/ocr/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -45,4 +48,4 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tax_calculation_agent", "conftest"]
+known-first-party = ["tax_calculation_agent", "orchestrator", "conftest"]

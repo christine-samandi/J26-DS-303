@@ -1,0 +1,176 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "req-mock",
+  "generated_at": "2026-10-15T00:00:00+05:30",
+  "query": {
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "as_of_date": "2025-04-01",
+    "income_types": [
+      "employment"
+    ],
+    "taxpayer_category": "resident_individual",
+    "rule_types": [
+      "relief",
+      "tax_slab"
+    ],
+    "top_k": 5,
+    "include_history": false
+  },
+  "results": [
+    {
+      "rank": 1,
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "rule_key": "personal_relief",
+      "rule_type": "relief",
+      "title": "Personal relief for resident individuals",
+      "text": "A resident individual is entitled to a personal relief of Rs. 1,800,000 for a year of assessment.",
+      "values": {
+        "amount": {
+          "amount": 1800000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-2-2025",
+        "document_title": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK]",
+        "document_type": "amendment_act",
+        "act_number": "2 of 2025",
+        "section": "TBC",
+        "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.TBC (personal relief)"
+      },
+      "validity": {
+        "valid_from": "2025-04-01",
+        "valid_to": null,
+        "status": "active",
+        "in_force_on_as_of_date": true,
+        "superseded_by": null,
+        "supersedes": "RULE-PERSONAL_RELIEF-V3",
+        "changed_by_document_id": "DOC-IRA-AMEND-2-2025"
+      },
+      "confidence": {
+        "score": 0.93,
+        "level": "high",
+        "components": {
+          "semantic_similarity": 0.9,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-2-2025-0001"
+        ],
+        "matched_text": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ..."
+      }
+    },
+    {
+      "rank": 2,
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+      "rule_key": "individual_income_tax_slabs",
+      "rule_type": "tax_slab",
+      "title": "Income tax rates for individuals (progressive bands)",
+      "text": "Taxable income of an individual is taxed in progressive bands at the rates listed.",
+      "values": {
+        "bands": [
+          {
+            "order": 1,
+            "lower": 0,
+            "upper": 1000000,
+            "rate_percent": 6
+          },
+          {
+            "order": 2,
+            "lower": 1000000,
+            "upper": 1500000,
+            "rate_percent": 18
+          },
+          {
+            "order": 3,
+            "lower": 1500000,
+            "upper": 2000000,
+            "rate_percent": 24
+          },
+          {
+            "order": 4,
+            "lower": 2000000,
+            "upper": 2500000,
+            "rate_percent": 30
+          },
+          {
+            "order": 5,
+            "lower": 2500000,
+            "upper": null,
+            "rate_percent": 36
+          }
+        ]
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-2-2025",
+        "document_title": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK]",
+        "document_type": "amendment_act",
+        "act_number": "2 of 2025",
+        "schedule": "First Schedule",
+        "paragraph": "TBC",
+        "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], First Schedule para. TBC (rates for individuals)"
+      },
+      "validity": {
+        "valid_from": "2025-04-01",
+        "valid_to": null,
+        "status": "active",
+        "in_force_on_as_of_date": true,
+        "superseded_by": null,
+        "supersedes": "RULE-INDIVIDUAL_SLABS-V3",
+        "changed_by_document_id": "DOC-IRA-AMEND-2-2025"
+      },
+      "confidence": {
+        "score": 0.9,
+        "level": "high",
+        "components": {
+          "semantic_similarity": 0.9,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-2-2025-0002"
+        ],
+        "matched_text": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ..."
+      }
+    }
+  ],
+  "warnings": [],
+  "metadata": {
+    "retrieval_mode": "mock",
+    "latency_ms": 0,
+    "corpus_version": "c1-mock-2026-10-15",
+    "embedding_model": "none (mock)",
+    "candidates_considered": 2,
+    "confidence_method": "mock"
+  }
+}
