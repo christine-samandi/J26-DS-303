@@ -1,8 +1,9 @@
 """Typed tax rules for one year of assessment (YA), and the loader for the local seed files.
 
-The engine only ever sees a `RuleSet`. Today it is built from the seed YAML
-(`rules/ya_YYYY_YY.yaml`); later a second builder will make one from C3's `RetrievalOutput`,
-so seed and C3 values can be compared field by field.
+The engine only ever sees a `RuleSet`. There are two builders: `load_seed_rules` reads the
+local seed YAML (`rules/ya_YYYY_YY.yaml`), and `rules_from_retrieval` reads C3's
+`RetrievalOutput`. `rule_conflicts` compares the two field by field; a disagreement is
+surfaced, never silently resolved.
 
 All money and rates are `Decimal`, converted from the YAML text with `Decimal(str(value))`
 so no float ever enters the engine.
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from j26_contracts.retrieval import RetrievalOutput, RetrievedRule
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 RULES_DIR = Path(__file__).resolve().parent / "rules"
@@ -24,6 +26,8 @@ SEED_SCHEMA = "c1-seed-rules/1"
 _YA_PATTERN = re.compile(r"^(\d{4})/(\d{2})$")
 
 RuleOrigin = Literal["seed", "c3"]
+RELIEF_KEY = "personal_relief"
+SLABS_KEY = "individual_income_tax_slabs"
 
 
 class RuleSetError(ValueError):
@@ -136,8 +140,8 @@ def _build(data: dict, year_of_assessment: str) -> RuleSet:
     if (data["period"]["start"], data["period"]["end"]) != (start, end):
         raise RuleSetError(f"period must be {start} to {end}")
 
-    relief = _one_rule(data, "personal_relief")
-    slabs = _one_rule(data, "individual_income_tax_slabs")
+    relief = _one_rule(data, RELIEF_KEY)
+    slabs = _one_rule(data, SLABS_KEY)
     for r in (relief, slabs):
         _check_in_force_for_ya(r, start, end)
 
@@ -197,3 +201,97 @@ def _dec(value: object) -> Decimal:
     if not result.is_finite():
         raise RuleSetError(f"expected a finite number, got {value!r}")
     return result
+
+
+def rules_from_retrieval(output: RetrievalOutput, year_of_assessment: str) -> RuleSet:
+    """Build a RuleSet from C3's answer, using only the rules in force on the queried date.
+
+    Numbers come from the structured `values`, never from the rule text.
+    """
+    start, end = ya_period(year_of_assessment)
+    as_of = output.query.as_of_date
+    if not start <= as_of <= end:
+        raise RuleSetError(f"C3 was queried for {as_of}, outside YA {year_of_assessment}")
+    relief = _in_force(output, RELIEF_KEY)
+    slabs = _in_force(output, SLABS_KEY)
+    if relief.values is None or relief.values.amount is None:
+        raise RuleSetError(f"{relief.rule_id} has no structured amount")
+    if slabs.values is None or slabs.values.bands is None:
+        raise RuleSetError(f"{slabs.rule_id} has no structured bands")
+    try:
+        return RuleSet(
+            year_of_assessment=year_of_assessment,
+            period_start=start,
+            period_end=end,
+            personal_relief=PersonalRelief(
+                amount=_dec(relief.values.amount.amount), ref=_c3_ref(relief)
+            ),
+            tax_bands=TaxBands(
+                bands=tuple(
+                    TaxBand(
+                        order=b.order,
+                        lower=_dec(b.lower),
+                        upper=None if b.upper is None else _dec(b.upper),
+                        rate_percent=_dec(b.rate_percent),
+                    )
+                    for b in slabs.values.bands
+                ),
+                ref=_c3_ref(slabs),
+            ),
+        )
+    except ValueError as e:  # includes pydantic's ValidationError
+        raise RuleSetError(f"C3 rules for YA {year_of_assessment}: {e}") from e
+
+
+def rule_conflicts(seed: RuleSet, other: RuleSet) -> list[str]:
+    """Every value on which two RuleSets disagree, as readable messages. Empty = they agree."""
+    conflicts = []
+    if seed.personal_relief.amount != other.personal_relief.amount:
+        conflicts.append(
+            f"personal relief: seed {seed.personal_relief.amount}, "
+            f"{other.personal_relief.ref.origin} {other.personal_relief.amount}"
+        )
+    a, b = seed.tax_bands.bands, other.tax_bands.bands
+    if len(a) != len(b):
+        conflicts.append(
+            f"tax bands: seed has {len(a)} bands, {other.tax_bands.ref.origin} has {len(b)}"
+        )
+    else:
+        for x, y in zip(a, b, strict=True):
+            if (x.lower, x.upper, x.rate_percent) != (y.lower, y.upper, y.rate_percent):
+                conflicts.append(
+                    f"tax band {x.order}: seed {x.lower}-{x.upper} @ {x.rate_percent}%, "
+                    f"{other.tax_bands.ref.origin} {y.lower}-{y.upper} @ {y.rate_percent}%"
+                )
+    return conflicts
+
+
+def mid_year_changes(rules: RuleSet) -> list[str]:
+    """Rules that stop applying before the YA ends: the YA-start value may not hold all year."""
+    return [
+        f"{ref.rule_id} ends on {ref.valid_to}, before the YA ends on {rules.period_end}"
+        for ref in (rules.personal_relief.ref, rules.tax_bands.ref)
+        if ref.valid_to is not None and ref.valid_to < rules.period_end
+    ]
+
+
+def _in_force(output: RetrievalOutput, rule_key: str) -> RetrievedRule:
+    matches = [
+        r for r in output.results if r.rule_key == rule_key and r.validity.in_force_on_as_of_date
+    ]
+    if len(matches) != 1:
+        raise RuleSetError(
+            f"expected exactly one {rule_key!r} rule in force on {output.query.as_of_date} "
+            f"from C3, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _c3_ref(rule: RetrievedRule) -> RuleRef:
+    return RuleRef(
+        rule_id=rule.rule_id,
+        citation=rule.source.citation,
+        origin="c3",
+        valid_from=rule.validity.valid_from,
+        valid_to=rule.validity.valid_to,
+    )

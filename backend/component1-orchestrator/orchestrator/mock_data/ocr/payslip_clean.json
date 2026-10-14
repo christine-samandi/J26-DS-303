@@ -1,0 +1,16 @@
+{
+  "document_id": "doc-payslip-clean",
+  "document_type": "payslip_annual_summary",
+  "fields": [
+    {
+      "name": "employment_income",
+      "value": "3000000",
+      "confidence": "0.97"
+    },
+    {
+      "name": "apit_paid",
+      "value": "50000",
+      "confidence": "0.95"
+    }
+  ]
+}
