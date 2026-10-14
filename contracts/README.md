@@ -12,6 +12,7 @@ non-Python tool. Never edit `schemas/*.schema.json` by hand.
 | Contract | Models | Generated schemas | Mock examples | Owner |
 |---|---|---|---|---|
 | Retrieval (C1/C4 → C3 → C1/C4) | `j26_contracts/retrieval.py` | `schemas/retrieval_request.schema.json`, `schemas/retrieval_output.schema.json` | `mock_data/retrieval_output_examples/` | C3 |
+| Pipeline trace (C1 → C4) — **proposal v0.1.0** | `j26_contracts/trace.py` | `schemas/pipeline_trace.schema.json` | `mock_data/pipeline_trace_examples/` | C1 |
 
 Other components can add their contracts the same way (e.g. `j26_contracts/ocr.py`,
 `j26_contracts/assurance.py`) and register them in `j26_contracts/export.py`.
