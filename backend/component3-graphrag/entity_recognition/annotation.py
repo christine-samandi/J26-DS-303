@@ -58,7 +58,7 @@ GUIDE = [
     "     If the same words appear twice in the chunk, add two rows.",
     "  3. When the chunk is finished, type  done  in column D of its grey header row.",
     "     Chunks without 'done' are ignored, so you can annotate in several sittings.",
-    "  4. Not enough rows? Insert rows inside the chunk's block (column A must show its chunk ID).",
+    "  4. Not enough rows? Insert rows inside the chunk's block (column A may stay empty).",
     "",
     "LABELS (what to mark, and the exact words to copy)",
     "  AMOUNT       money: 'Rs. 1,800,000', 'Rs.0', 'Rs. 3 million', 'sixty thousand rupees'",
@@ -165,8 +165,30 @@ def build_workbook(chunks: list[Chunk], path: Path) -> int:
     return len(chunks)
 
 
+def _cell_text(cell) -> str:
+    """The annotator's text, undoing Excel's automatic conversions.
+
+    Excel turns a typed "4%" into the number 0.04 and "April 1, 2025" into a date. Percentages
+    are turned back into "4%"; dates become ISO text ("2025-04-01"), which the scorer compares
+    by date value.
+    """
+    from datetime import date, datetime
+
+    value = cell.value
+    if isinstance(value, datetime | date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        if "%" in (cell.number_format or ""):
+            return f"{value * 100:g}%"
+        return f"{value:g}"
+    return " ".join(str(value).split())
+
+
 def read_annotations(path: Path) -> tuple[dict[str, str], dict[str, list[tuple[str, str]]]]:
-    """Return ({chunk_id: text} for chunks marked done, {chunk_id: [(label, text), ...]})."""
+    """Return ({chunk_id: text} for chunks marked done, {chunk_id: [(label, text), ...]}).
+
+    Rows inserted by the annotator may leave column A empty: they belong to the chunk above.
+    """
     from openpyxl import load_workbook
 
     ws = load_workbook(path)[SHEET]
@@ -174,7 +196,8 @@ def read_annotations(path: Path) -> tuple[dict[str, str], dict[str, list[tuple[s
     done: set[str] = set()
     gold: dict[str, list[tuple[str, str]]] = {}
     current: str | None = None
-    for a, b, c, d in ws.iter_rows(min_row=2, max_col=4, values_only=True):
+    for row in ws.iter_rows(min_row=2, max_col=4):
+        a, b, c, d = (cell.value for cell in row)
         if a and isinstance(b, str) and b.startswith("CHUNK "):  # grey header row
             current = a
             if str(d or "").strip().lower() == DONE:
@@ -183,10 +206,12 @@ def read_annotations(path: Path) -> tuple[dict[str, str], dict[str, list[tuple[s
         if not a and current and b and current not in texts:  # the chunk text row
             texts[current] = b
             continue
-        if a and b and c is not None and str(c).strip():
-            if b not in LABELS:
-                raise SystemExit(f"Unknown label {b!r} for {a} in {path.name}")
-            gold.setdefault(a, []).append((b, " ".join(str(c).split())))
+        chunk_id = a or current
+        if chunk_id and b and c is not None and str(c).strip():
+            label = str(b).strip()
+            if label not in LABELS:
+                raise SystemExit(f"Unknown label {label!r} for {chunk_id} in {path.name}")
+            gold.setdefault(chunk_id, []).append((label, _cell_text(row[2])))
     return {cid: texts[cid] for cid in texts if cid in done}, {
         cid: gold.get(cid, []) for cid in done
     }

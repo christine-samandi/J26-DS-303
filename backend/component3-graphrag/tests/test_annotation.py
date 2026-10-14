@@ -98,3 +98,37 @@ def test_sample_is_core_plus_fixed_random():
     assert [c.chunk_id for c in picked[: len(CORE)]] == CORE
     assert len(picked) == len(CORE) + 8 + 2
     assert [c.chunk_id for c in select_chunks(chunks)] == [c.chunk_id for c in picked]  # seeded
+
+
+def test_excel_conversions_and_inserted_rows(tmp_path):
+    """Excel stores a typed "4%" as 0.04 and "April 1, 2025" as a date; inserted rows may
+    have no chunk ID in column A."""
+    from datetime import datetime
+
+    from openpyxl import load_workbook
+
+    path = tmp_path / "ann.xlsx"
+    build_workbook([_chunk("CHUNK-A", A + " at 4%")], path)
+    wb = load_workbook(path)
+    ws = wb[SHEET]
+    ws["D2"] = "done"
+    ws["B4"], ws["C4"] = "RATE", 0.04
+    ws["C4"].number_format = "0%"
+    ws.insert_rows(5)  # a row the annotator inserted: column A left empty
+    ws["B5"], ws["C5"] = "DATE", datetime(2025, 4, 1)
+    ws["B6"], ws["C6"] = "AMOUNT", "Rs. 1,800,000"
+    wb.save(path)
+    texts, gold = read_annotations(path)
+    assert gold["CHUNK-A"] == [("RATE", "4%"), ("DATE", "2025-04-01"), ("AMOUNT", "Rs. 1,800,000")]
+    result = evaluate(texts, gold)
+    assert result.strict["DATE"].tp == result.strict["RATE"].tp == result.strict["AMOUNT"].tp == 1
+
+
+def test_lenient_prefers_exact_partners():
+    from entity_recognition.evaluate import _match
+
+    gold = [("AMOUNT", "Rs. 6"), ("AMOUNT", "Rs. 600,000")]
+    pred = [("AMOUNT", "Rs. 600,000"), ("AMOUNT", "Rs. 6")]
+    matched, missed, extra = _match(gold, pred, lenient=True)
+    assert len(matched) == 2 and not missed and not extra
+    assert all(g == p for g, p in matched)

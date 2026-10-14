@@ -22,16 +22,27 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from entity_recognition.annotation import LABELS, read_annotations
-from entity_recognition.extract import extract_entities
+from entity_recognition.extract import extract_entities, normalise_date
 
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).strip(" .,;:\"'“”‘’").casefold()
+
+
+def _same(label: str, gold: str, pred: str) -> bool:
+    """Exact match; for dates, the same calendar day (Excel may have stored the gold as a date)."""
+    if _norm(gold) == _norm(pred):
+        return True
+    if label == "DATE":
+        g = gold if re.fullmatch(r"\d{4}-\d{2}-\d{2}", gold) else normalise_date(gold)
+        return g is not None and g == normalise_date(pred)
+    return False
 
 
 @dataclass
@@ -75,24 +86,32 @@ class Result:
 
 
 def _match(gold: list[tuple[str, str]], pred: list[tuple[str, str]], lenient: bool):
-    """One-to-one matching; returns (matched pairs, unmatched gold, unmatched predicted)."""
+    """One-to-one matching; returns (matched pairs, unmatched gold, unmatched predicted).
+
+    Exact matches are paired first, so in lenient mode an overlap can only pair entities that
+    have no exact partner (gold "Rs. 600,000" is never spent on a predicted "Rs. 6").
+    """
     unmatched_pred = list(pred)
     matched, missed = [], []
-    for g in gold:
-        hit = None
-        for p in unmatched_pred:
-            if p[0] != g[0]:
-                continue
-            a, b = _norm(g[1]), _norm(p[1])
-            if a == b or (lenient and (a in b or b in a)):
-                hit = p
-                break
-        if hit is None:
-            missed.append(g)
-        else:
-            unmatched_pred.remove(hit)
-            matched.append((g, hit))
+    passes = [_same] + ([_overlaps] if lenient else [])
+    todo = list(gold)
+    for test in passes:
+        still = []
+        for g in todo:
+            hit = next((p for p in unmatched_pred if p[0] == g[0] and test(g[0], g[1], p[1])), None)
+            if hit is None:
+                still.append(g)
+            else:
+                unmatched_pred.remove(hit)
+                matched.append((g, hit))
+        todo = still
+    missed = todo
     return matched, missed, unmatched_pred
+
+
+def _overlaps(label: str, gold: str, pred: str) -> bool:
+    a, b = _norm(gold), _norm(pred)
+    return bool(a and b) and (a in b or b in a)
 
 
 def evaluate(texts: dict[str, str], gold: dict[str, list[tuple[str, str]]]) -> Result:
