@@ -138,6 +138,14 @@ def test_non_transient_error_is_not_retried(one_scenario, tmp_path, sleeps):
     assert row["api_error"] == "TimeoutError: deadline exceeded"
 
 
+def test_daily_quota_is_not_retried(one_scenario, tmp_path, sleeps):
+    daily = APIError(429, "quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    client = Flaky([daily], reply())
+    row, _ = run(one_scenario, tmp_path / "out", client, exit_code=1)
+    assert len(client.prompts) == 1 and sleeps == []
+    assert "PerDay" in row["api_error"]
+
+
 def test_pacer_spaces_calls_to_the_rpm_limit(monkeypatch, sleeps):
     now = iter([0.0, 3.0, 12.0])  # 1st call; 2nd call asks at t=3, resumes at t=12
     monkeypatch.setattr(baseline.time, "monotonic", lambda: next(now))

@@ -132,7 +132,9 @@ def call_llm(client: LLMClient, prompt: str, pacer: Pacer) -> tuple[str, str]:
         try:
             return client.generate(prompt)
         except Exception as exc:
-            if getattr(exc, "code", None) not in TRANSIENT_CODES or attempt == MAX_API_ATTEMPTS:
+            transient = getattr(exc, "code", None) in TRANSIENT_CODES
+            # The daily quota only resets at midnight Pacific: waiting inside a run can't help.
+            if not transient or "PerDay" in str(exc) or attempt == MAX_API_ATTEMPTS:
                 raise
             time.sleep(retry_delay(exc, attempt))
     raise AssertionError("unreachable")
