@@ -21,6 +21,12 @@ dev = [
     "hypothesis>=6.100",
     "ruff>=0.5",
 ]
+# LLM calls (pure-LLM baseline now; interpretation + explanation later). Never imported by
+# tax_calculation_agent/, which test_engine_properties enforces.
+llm = [
+    "google-genai>=2.30",
+    "python-dotenv>=1.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["tax_calculation_agent*"]

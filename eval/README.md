@@ -13,10 +13,11 @@ changes if the hand calculation itself was wrong, and that change needs a second
 eval/
   scenarios/GS-NNN_<slug>.json   one scenario per file
   run_engine.py                  engine calculation accuracy (target 100%)
+  run_baseline_llm.py            pure-LLM baseline: the LLM does the arithmetic, same scoring
   results/                       run outputs, git-ignored
 ```
 
-More metric scripts (`run_baseline_llm.py`, `run_explanations.py`, ...) will be added here.
+More metric scripts (`run_explanations.py`, `run_latency.py`, ...) will be added here.
 
 ## Running
 
@@ -29,6 +30,21 @@ python eval/run_engine.py
 Writes `results/engine_<UTC time>_<git sha>.csv` and `.md`. A `-dirty` suffix on the SHA
 means there were uncommitted changes, so don't report numbers from a dirty run. Only
 `verified` scenarios count towards accuracy. The script exits 1 if any of them fails.
+
+### Pure-LLM baseline
+
+```bash
+pip install -e "backend/component1-orchestrator[llm]"
+cp .env.example .env        # then set GEMINI_API_KEY
+python eval/run_baseline_llm.py
+```
+
+The LLM gets the same seed rules as the engine, inside the prompt, and must return the four
+totals as JSON. It is scored exactly like the engine, to the cent. Temperature 0, seed 0, one
+retry on a malformed reply. The results record the model that was requested, the model
+version that actually answered, and the prompt version. Raw replies are saved to
+`results/baseline_llm_*.raw.jsonl`. Wrong answers are the result being measured, so the script
+always exits 0.
 
 ## Scenario format
 
