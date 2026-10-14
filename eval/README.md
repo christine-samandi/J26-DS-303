@@ -43,8 +43,15 @@ The LLM gets the same seed rules as the engine, inside the prompt, and must retu
 totals as JSON. It is scored exactly like the engine, to the cent. Temperature 0, seed 0, one
 retry on a malformed reply. The results record the model that was requested, the model
 version that actually answered, and the prompt version. Raw replies are saved to
-`results/baseline_llm_*.raw.jsonl`. Wrong answers are the result being measured, so the script
-always exits 0.
+`results/baseline_llm_*.raw.jsonl`.
+
+Calls are spaced to `--rpm` requests per minute (default 5, the Gemini free tier). Rate-limit
+and overload errors (429/500/503) are retried up to 4 times, waiting as long as the API asks,
+except the daily quota, which only resets at midnight Pacific.
+A scenario that still gets no answer is an API error: it is listed separately and excluded from
+accuracy, because it says nothing about the LLM's arithmetic. Wrong answers are the result being
+measured, so they don't fail the run; any API error does (exit 1), since the run is incomplete
+and its numbers shouldn't be reported. A full run takes about 2–3 minutes on the free tier.
 
 ## Scenario format
 

@@ -22,6 +22,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -36,6 +37,10 @@ from tax_calculation_agent.ruleset import RuleSet, load_seed_rules
 
 PROMPT_VERSION = "baseline-v1"
 DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_RPM = 5.0  # Gemini free tier: 5 requests per minute per model
+HTTP_TIMEOUT_MS = 60_000
+TRANSIENT_CODES = {429, 500, 503}  # rate limit / overloaded: wait and call again
+MAX_API_ATTEMPTS = 4
 CSV_FIELDS = (
     "scenario_id",
     "verified",
@@ -43,6 +48,7 @@ CSV_FIELDS = (
     "parsed",
     *(f"{side}_{k}" for k in TOTALS for side in ("expected", "llm")),
     "mismatches",
+    "api_error",
     "latency_s",
 )
 
@@ -83,7 +89,10 @@ class GeminiClient:
         from google.genai import types
 
         self.model = model
-        self._client = genai.Client(api_key=api_key)
+        # Without a timeout a dead connection hangs forever (seen with broken IPv6 routes).
+        self._client = genai.Client(
+            api_key=api_key, http_options=types.HttpOptions(timeout=HTTP_TIMEOUT_MS)
+        )
         self._config = types.GenerateContentConfig(
             temperature=0, seed=0, response_mime_type="application/json"
         )
@@ -95,6 +104,42 @@ class GeminiClient:
         return response.text or "", response.model_version or self.model
 
 
+class Pacer:
+    """Spaces LLM calls so the run stays under the API's requests-per-minute quota."""
+
+    def __init__(self, rpm: float) -> None:
+        self.interval = 60 / rpm if rpm > 0 else 0.0
+        self._last: float | None = None
+
+    def wait(self) -> None:
+        if self._last is not None:
+            delay = self._last + self.interval - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+        self._last = time.monotonic()
+
+
+def retry_delay(exc: Exception, attempt: int) -> float:
+    """The delay the API asks for ("Please retry in 56.4s"), else exponential backoff."""
+    match = re.search(r"retry in ([\d.]+)s", str(exc))
+    return float(match.group(1)) + 1 if match else 10.0 * 2 ** (attempt - 1)
+
+
+def call_llm(client: LLMClient, prompt: str, pacer: Pacer) -> tuple[str, str]:
+    """client.generate, retried on rate-limit/overload errors. Anything else is raised."""
+    for attempt in range(1, MAX_API_ATTEMPTS + 1):
+        pacer.wait()
+        try:
+            return client.generate(prompt)
+        except Exception as exc:
+            transient = getattr(exc, "code", None) in TRANSIENT_CODES
+            # The daily quota only resets at midnight Pacific: waiting inside a run can't help.
+            if not transient or "PerDay" in str(exc) or attempt == MAX_API_ATTEMPTS:
+                raise
+            time.sleep(retry_delay(exc, attempt))
+    raise AssertionError("unreachable")
+
+
 @dataclass
 class Outcome:
     scenario_id: str
@@ -104,6 +149,7 @@ class Outcome:
     mismatches: list[str] = field(default_factory=list)
     raw: list[str] = field(default_factory=list)
     model_version: str = ""
+    api_error: str = ""
     latency_s: float = 0.0
 
     @property
@@ -139,7 +185,7 @@ def parse_answer(text: str) -> dict[str, Decimal]:
         raise ValueError(f"unparseable reply: {type(exc).__name__}") from exc
 
 
-def evaluate(scenario: dict, client: LLMClient) -> Outcome:
+def evaluate(scenario: dict, client: LLMClient, pacer: Pacer) -> Outcome:
     outcome = Outcome(
         scenario_id=scenario["scenario_id"],
         verified=scenario["verification"]["status"] == "verified",
@@ -150,9 +196,10 @@ def evaluate(scenario: dict, client: LLMClient) -> Outcome:
     start = time.perf_counter()
     for _ in range(2):  # one retry on a malformed reply, as for the interpretation agent
         try:
-            text, outcome.model_version = client.generate(prompt)
-        except Exception as exc:  # an API failure is a failed scenario, not a failed run
-            outcome.mismatches = [f"llm error: {type(exc).__name__}: {exc}"]
+            text, outcome.model_version = call_llm(client, prompt, pacer)
+        except Exception as exc:  # no answer at all: excluded from accuracy, not counted wrong
+            outcome.api_error = f"{type(exc).__name__}: {exc}"
+            outcome.mismatches = []
             break
         outcome.raw.append(text)
         try:
@@ -182,6 +229,7 @@ def write_csv(path: Path, outcomes: list[Outcome]) -> None:
                 "passed": o.passed,
                 "parsed": o.parsed,
                 "mismatches": "; ".join(o.mismatches),
+                "api_error": o.api_error,
                 "latency_s": o.latency_s,
             }
             for k in TOTALS:
@@ -199,8 +247,9 @@ def write_raw(path: Path, outcomes: list[Outcome]) -> None:
 
 def write_markdown(path: Path, outcomes: list[Outcome], model: str, sha: str, run_at: str) -> None:
     verified = [o for o in outcomes if o.verified]
-    passed = sum(o.passed for o in verified)
-    accuracy = f"{100 * passed / len(verified):.1f}%" if verified else "n/a"
+    answered = [o for o in verified if not o.api_error]
+    passed = sum(o.passed for o in answered)
+    accuracy = f"{100 * passed / len(answered):.1f}%" if answered else "n/a"
     versions = sorted({o.model_version for o in outcomes if o.model_version}) or ["—"]
     lines = [
         "# Pure-LLM baseline calculation accuracy",
@@ -209,8 +258,9 @@ def write_markdown(path: Path, outcomes: list[Outcome], model: str, sha: str, ru
         f"- Git SHA: `{sha}`",
         f"- Model requested: `{model}`; answered by: {', '.join(f'`{v}`' for v in versions)}",
         f"- Prompt: `{PROMPT_VERSION}`, temperature 0, seed 0, seed rules given in the prompt",
-        f"- **Accuracy (verified scenarios): {passed}/{len(verified)} = {accuracy}**",
-        f"- Unparseable replies: {sum(not o.parsed for o in verified)}",
+        f"- **Accuracy (verified scenarios answered): {passed}/{len(answered)} = {accuracy}**",
+        f"- Unparseable replies (counted wrong): {sum(not o.parsed for o in answered)}",
+        f"- API errors, no answer (excluded): {len(verified) - len(answered)}",
         f"- Unverified scenarios (excluded): {len(outcomes) - len(verified)}",
         "",
         "| Scenario | Verified | Pass | Expected tax | LLM tax | Expected payable"
@@ -218,27 +268,31 @@ def write_markdown(path: Path, outcomes: list[Outcome], model: str, sha: str, ru
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for o in outcomes:
+        notes = f"API error: {o.api_error}" if o.api_error else "; ".join(o.mismatches)
         cells = [
             o.scenario_id,
             "yes" if o.verified else "no",
-            "✅" if o.passed else "❌",
+            "⚠️" if o.api_error else "✅" if o.passed else "❌",
             money(o.expected["total_tax"]),
             o.answer.get("total_tax", "—"),
             money(o.expected["tax_payable"]),
             o.answer.get("tax_payable", "—"),
             money(o.expected["refund"]),
             o.answer.get("refund", "—"),
-            "; ".join(o.mismatches).replace("|", "\\|"),
+            notes.replace("|", "\\|"),
         ]
         lines.append("| " + " | ".join(str(c) for c in cells) + " |")
     path.write_text("\n".join(lines) + "\n")
 
 
-def run(scenario_dir: Path, out_dir: Path, client: LLMClient) -> tuple[list[Outcome], Path]:
+def run(
+    scenario_dir: Path, out_dir: Path, client: LLMClient, rpm: float = DEFAULT_RPM
+) -> tuple[list[Outcome], Path]:
     paths = sorted(scenario_dir.glob("GS-*.json"))
     if not paths:
         raise SystemExit(f"no golden scenarios found in {scenario_dir}")
-    outcomes = [evaluate(load_scenario(p), client) for p in paths]
+    pacer = Pacer(rpm)
+    outcomes = [evaluate(load_scenario(p), client, pacer) for p in paths]
 
     now = datetime.now(UTC)
     sha = git_sha()
@@ -266,17 +320,25 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scenarios", type=Path, default=EVAL_DIR / "scenarios")
     parser.add_argument("--out", type=Path, default=EVAL_DIR / "results")
+    parser.add_argument(
+        "--rpm", type=float, default=DEFAULT_RPM, help="max LLM requests per minute (0 = no limit)"
+    )
     args = parser.parse_args(argv)
 
     client = client or gemini_from_env()
-    outcomes, md_path = run(args.scenarios, args.out, client)
+    outcomes, md_path = run(args.scenarios, args.out, client, args.rpm)
     verified = [o for o in outcomes if o.verified]
-    failed = [o for o in verified if not o.passed]
-    print(f"LLM baseline ({client.model}): {len(verified) - len(failed)}/{len(verified)} correct")
+    answered = [o for o in verified if not o.api_error]
+    failed = [o for o in answered if not o.passed]
+    print(f"LLM baseline ({client.model}): {len(answered) - len(failed)}/{len(answered)} correct")
     for o in failed:
         print(f"  WRONG {o.scenario_id}: {'; '.join(o.mismatches)}")
+    for o in verified:
+        if o.api_error:
+            print(f"  NO ANSWER {o.scenario_id}: {o.api_error[:200]}")
     print(f"Wrote {md_path} (+ .csv, .raw.jsonl)")
-    return 0  # wrong LLM answers are a result to report, not a failed run
+    # Wrong LLM answers are the result being measured; missing answers mean the run is incomplete.
+    return 1 if len(answered) < len(verified) else 0
 
 
 if __name__ == "__main__":
