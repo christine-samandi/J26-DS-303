@@ -30,8 +30,8 @@ The models also enforce rules JSON Schema cannot express:
 | Ground truth | `ground_truth/` | ✅ rule versions (personal relief V1–V4, tax bands B1–B4, all verified); entity answer key (10 core chunks, 246 entities) |
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ✅ Phase 2: 1,324 chunks, 10 entity types; blind P 0.97 / R 1.00, adjudicated P = R = 0.996 (10 core chunks) |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ✅ Phase 3: rule versions rebuilt from the Acts (8/8 exact); graph builder |
-| Vector store (ChromaDB) | `vector_store/` | ⏳ Phase 4 |
-| GraphRAG retrieval | `retrieval_api/` | ⏳ Phase 4 |
+| Vector store (ChromaDB) | `vector_store/` | ⏳ next (TF-IDF term coverage used for now) |
+| GraphRAG retrieval | `retrieval_api/` | ✅ Phase 4: text + graph neighbourhood + date filter, contract output, confidence (`C3_MODE=graphrag`) |
 
 ## How to run standalone
 
@@ -92,6 +92,14 @@ MATCH (v:RuleVersion)-[:VERSION_OF]->(:Rule {rule_key:'personal_relief'})
 OPTIONAL MATCH (v)-[:DEFINED_IN]->(c:Chunk)
 RETURN v, c
 ```
+
+**Phase 4: ask the graph (Neo4j running, graph built)**
+```bash
+python -m retrieval_api.graph_backend "What personal relief can I claim?" --date 2024-06-01
+python -m retrieval_api.graph_backend "tax slabs" --date 2021-06-01 --history
+```
+Set `C3_MODE=graphrag` in `.env` to make the API below answer from the graph instead of the
+mock examples (restart the API after rebuilding the graph).
 
 **Run the retrieval API**
 ```bash
