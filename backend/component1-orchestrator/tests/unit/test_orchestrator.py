@@ -194,3 +194,108 @@ def test_only_graph_module_imports_langgraph():
 def test_request_id_must_be_req_prefixed(bad_id):
     with pytest.raises(ValueError):
         request(request_id=bad_id)
+
+
+# --- explanation LLM (fake: no real Gemini calls) ---------------------------------------------
+
+
+class FakeExplainer:
+    """Rewords whatever steps the prompt holds; `cheat` edits a step's text first."""
+
+    model = "fake-explainer"
+    temperature = 0.0
+
+    def __init__(self, cheat=None, error=None):
+        self.cheat = cheat or {}
+        self.error = error
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> tuple[str, str]:
+        self.prompts.append(prompt)
+        if self.error:
+            raise self.error
+        steps = json.loads(prompt.split("Steps:\n", 1)[1].split("\n\nAnswer with JSON", 1)[0])
+        reworded = {s["step_id"]: f"In short: {s['text']}" for s in steps}
+        lines = [{"step_id": k, "text": self.cheat.get(k, v)} for k, v in reworded.items()]
+        return json.dumps({"lines": lines}), "fake-explainer-001"
+
+
+def llm_deps(llm, script=()) -> Deps:
+    d = deps(script)
+    d.explainer_llm = llm
+    return d
+
+
+def test_honest_explainer_rewrite_is_delivered_and_logged_in_the_trace():
+    d = llm_deps(FakeExplainer())
+    result = run(typed(), d)
+    assert result.status == "delivered" and result.confidence.explanation == D(1)
+    assert all(line.startswith("In short: ") for line in result.explanation.lines)
+    assert (
+        "[Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.TBC (personal relief)]"
+        in (result.explanation.lines[0])
+    )
+    (trace,) = d.assurance.traces
+    (call,) = trace.llm_calls
+    assert (call.stage, call.model, call.prompt_version, call.temperature) == (
+        "explain",
+        "fake-explainer-001",
+        "explain-v1",
+        0,
+    )
+    assert trace.explanation == result.explanation
+    assert [c.text for c in trace.claims] == list(result.explanation.lines)
+
+
+def test_cheating_explainer_is_caught_flagged_and_sent_for_review():
+    cheat = "Rs. 3,000,000 less Rs. 1,800,000 leaves Rs. 1,100,000 [RULE-PERSONAL_RELIEF-V4]."
+    d = llm_deps(FakeExplainer(cheat={"S2_TAXABLE_INCOME": cheat}))
+    result = run(typed(), d)
+    e = result.explanation
+    assert e.used_fallback and e.hallucination_flag
+    assert "1,100,000" not in " ".join(e.lines)
+    assert e.lines[1].startswith("Taxable income: employment income less personal relief")
+    assert result.calc.taxable_income == D(1200000)  # the engine's figure is untouched
+    assert result.confidence.explanation == D("0.5")
+    assert result.status == "needs_review"
+    assert any("S2_TAXABLE_INCOME: 1100000 is not one" in w for w in result.warnings)
+    (trace,) = d.assurance.traces
+    assert trace.explanation.hallucination_flag
+    assert cheat in trace.llm_calls[0].output  # the rejected reply is kept for C4 and audit
+
+
+def test_explainer_citing_an_unretrieved_rule_is_caught():
+    cheat = "Everyone gets Rs. 1,800,000 tax-free [RULE-PERSONAL_RELIEF-V3]."  # superseded
+    result = run(typed(), llm_deps(FakeExplainer(cheat={"S1_RELIEF": cheat})))
+    assert result.explanation.hallucination_flag
+    assert any("cites 'RULE-PERSONAL_RELIEF-V3'" in w for w in result.warnings)
+
+
+def test_explainer_outage_shows_the_template_without_review():
+    d = llm_deps(FakeExplainer(error=ConnectionError("no route")))
+    result = run(typed(), d)
+    assert result.status == "delivered" and result.confidence.explanation == D(1)
+    assert not result.explanation.used_fallback
+    assert d.assurance.traces[0].llm_calls == ()
+    assert result.warnings == (
+        "explanation LLM call failed (ConnectionError); template text shown",
+    )
+
+
+def test_regenerate_from_explain_calls_the_llm_again_and_traces_each_attempt():
+    verdict = AssuranceVerdict(
+        request_id="req-0001", attempt=1, decision="REGENERATE", rerun_from="explain"
+    )
+    llm = FakeExplainer(cheat={"S6_PAYABLE": "You owe Rs. 45,000."})
+    d = llm_deps(llm, script=[verdict, "PASS"])
+    result = run(typed(), d)
+    assert len(llm.prompts) == 2
+    assert [len(t.llm_calls) for t in d.assurance.traces] == [1, 1]
+    assert result.attempt == 2 and result.explanation.hallucination_flag
+
+
+def test_without_an_explainer_the_trace_has_no_llm_calls():
+    d = deps()
+    run(typed(), d)
+    assert d.assurance.traces[0].llm_calls == ()
+    assert not d.assurance.traces[0].explanation.used_fallback

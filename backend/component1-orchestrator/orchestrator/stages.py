@@ -10,7 +10,8 @@ StageError; the runner records it and goes straight to `deliver`.
             REGENERATE (attempt 2) -> deliver, needs review
 
 The INTERPRET stage (LLM classification of ambiguous items) is not in v1: employment income
-and APIT need no interpretation.
+and APIT need no interpretation. The only LLM is the optional plain-language rewrite in
+EXPLAIN (`Deps.explainer_llm`), checked by the explanation agent before it is shown.
 """
 
 from __future__ import annotations
@@ -22,12 +23,12 @@ from typing import Literal
 
 from j26_contracts.retrieval import RetrievalRequest
 
+from explanation_agent.explainer import TextLLM
+from explanation_agent.explainer import explain as explain_steps
 from orchestrator.clients import AssuranceClient, OcrClient, RetrievalClient
 from orchestrator.confidence import REVIEW_THRESHOLD, c1_confidence
 from orchestrator.models import (
     MAX_ATTEMPTS,
-    Claim,
-    Explanation,
     OcrResult,
     OrchestratorResult,
     PipelineState,
@@ -65,6 +66,7 @@ class Deps:
     assurance: AssuranceClient
     seed_rules: Callable[[str], RuleSet] = load_seed_rules
     review_threshold: Decimal = REVIEW_THRESHOLD
+    explainer_llm: TextLLM | None = None  # None: the deterministic template is shown
 
 
 Update = dict  # the state keys a stage sets
@@ -150,27 +152,24 @@ def calculate_tax(state: PipelineState, deps: Deps) -> Update:
 
 
 def explain(state: PipelineState, deps: Deps) -> Update:
-    """Deterministic skeleton: one line per step, numbers from the engine, citations attached.
+    """Template text from the engine's steps, reworded by the LLM if one is configured.
 
-    The LLM plain-language rewrite and its post-check come later (milestone 5).
+    The rewrite is shown only if it keeps every number and citation (explanation_agent's
+    post-check); otherwise the template is. Citations are limited to rules C3 returned. The
+    prompt holds only engine figures and step descriptions, no personal data.
     """
-    rules = state["rules"]
-    citations = {ref.rule_id: ref.citation for ref in _refs(rules)}
     retrieved = {r.rule_id for r in state["retrieval"].results}
-    lines, claims = [], []
-    for i, step in enumerate(state["calc"].steps, start=1):
-        unsupported = [ref for ref in step.citation_refs if ref not in retrieved]
-        if unsupported:  # rule 3: only cite what C3 actually returned
-            raise StageError(f"{step.step_id} cites rules C3 did not return: {unsupported}")
-        cited = "".join(f" [{citations[ref]}]" for ref in step.citation_refs)
-        text = f"{step.description}: Rs. {step.result:,.2f}{cited}"
-        lines.append(text)
-        claims.append(
-            Claim(
-                claim_id=f"CL{i}", step_id=step.step_id, text=text, citation_refs=step.citation_refs
-            )
-        )
-    return {"explanation": Explanation(lines=tuple(lines), claims=tuple(claims))}
+    rules_used = {ref.rule_id: ref.citation for ref in _refs(state["rules"])}
+    rules_used = {k: v for k, v in rules_used.items() if k in retrieved}
+    try:
+        outcome = explain_steps(state["calc"].steps, rules_used, deps.explainer_llm)
+    except ValueError as e:  # a step cites a rule C3 did not return (rule 3)
+        raise StageError(str(e)) from e
+    return {
+        "explanation": outcome.explanation,
+        "explain_warnings": outcome.warnings,
+        "llm_calls": () if outcome.llm_call is None else (outcome.llm_call,),
+    }
 
 
 def score(state: PipelineState, deps: Deps) -> Update:
@@ -203,9 +202,11 @@ def assure(state: PipelineState, deps: Deps) -> Update:
         retrieval_rule_ids=tuple(r.rule_id for r in state["retrieval"].results),
         calc_steps=state["calc"].steps,
         claims=state["explanation"].claims,
+        explanation=state["explanation"],
+        llm_calls=state.get("llm_calls", ()),
         confidence=state["confidence"],
         conflicts=state.get("conflicts", ()),
-        warnings=state.get("warnings", ()),
+        warnings=_warnings(state),
     )
     verdict = deps.assurance.assure(trace)
     if (verdict.request_id, verdict.attempt) != (request.request_id, attempt):
@@ -276,7 +277,7 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
             verdicts=verdicts,
             review_reasons=tuple(reasons),
             conflicts=conflicts,
-            warnings=tuple(dict.fromkeys(state.get("warnings", ()))),
+            warnings=_warnings(state),
             stages_run=(*state.get("stages_run", ()), "deliver"),
         )
     }
@@ -297,6 +298,11 @@ def _profile_value(
                     document_id=doc.document_id,
                 )
     return None
+
+
+def _warnings(state: PipelineState) -> tuple[str, ...]:
+    """Pipeline warnings plus the latest explain run's, without repeats."""
+    return tuple(dict.fromkeys((*state.get("warnings", ()), *state.get("explain_warnings", ()))))
 
 
 def _refs(rules: RuleSet):

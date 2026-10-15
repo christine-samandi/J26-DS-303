@@ -19,7 +19,7 @@ from typing import Annotated, Literal, TypedDict
 from j26_contracts.retrieval import RetrievalOutput
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from explanation_agent.models import Claim, Explanation  # noqa: F401  (re-exported)
+from explanation_agent.models import Claim, Explanation, LlmCall  # noqa: F401  (re-exported)
 from tax_calculation_agent.engine import CalcResult, CalcStep
 from tax_calculation_agent.ruleset import RuleSet
 
@@ -117,6 +117,8 @@ class PipelineTrace(_Frozen):
     retrieval_rule_ids: tuple[str, ...]
     calc_steps: tuple[CalcStep, ...]
     claims: tuple[Claim, ...]
+    explanation: Explanation  # what the user is shown, with used_fallback/hallucination_flag
+    llm_calls: tuple[LlmCall, ...]  # this attempt's LLM calls; empty when no LLM was used
     confidence: ConfidenceBreakdown
     conflicts: tuple[str, ...]
     warnings: tuple[str, ...]
@@ -149,6 +151,8 @@ class PipelineState(TypedDict, total=False):
     warnings: tuple[str, ...]
     calc: CalcResult
     explanation: Explanation
+    explain_warnings: tuple[str, ...]  # replaced on every explain run, unlike `warnings`
+    llm_calls: tuple[LlmCall, ...]
     confidence: ConfidenceBreakdown
     trace: PipelineTrace
     verdicts: tuple[AssuranceVerdict, ...]
