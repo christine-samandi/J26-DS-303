@@ -334,3 +334,70 @@ def test_answers_to_a_since_corrected_scenario_are_not_reused(two_scenarios, tmp
     retry = FakeClient(answer_for(GS001))
     cli(two_scenarios, out, retry, "--only-missing")
     assert len(retry.prompts) == 1 and "Rs. 3000000" in retry.prompts[0]
+
+
+# --- IPv4 option -------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def resolver(monkeypatch):
+    """A fake socket.getaddrinfo that records the address family it was asked for."""
+    families: list[int] = []
+
+    def getaddrinfo(host, port, family=0, *args, **kwargs):
+        families.append(family)
+        return []
+
+    monkeypatch.setattr(baseline.socket, "getaddrinfo", getaddrinfo)
+    return families
+
+
+def test_force_ipv4_resolves_ipv4_only_and_is_idempotent(resolver):
+    baseline.force_ipv4()
+    patched = baseline.socket.getaddrinfo
+    baseline.force_ipv4()
+    assert baseline.socket.getaddrinfo is patched
+    baseline.socket.getaddrinfo("generativelanguage.googleapis.com", 443)
+    assert resolver == [baseline.socket.AF_INET]
+
+
+@pytest.fixture
+def gemini_env(monkeypatch, resolver):
+    """gemini_from_env without .env, the SDK or the network."""
+    monkeypatch.setattr(baseline, "configured_model", lambda: "fake-model")
+    monkeypatch.setattr(baseline, "GeminiClient", lambda key, model: (key, model))
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.delenv("GEMINI_FORCE_IPV4", raising=False)
+    return resolver
+
+
+def ipv4_forced() -> bool:
+    return getattr(baseline.socket.getaddrinfo, "ipv4_only", False)
+
+
+def test_ipv4_is_off_by_default(gemini_env):
+    assert baseline.gemini_from_env() == ("test-key", "fake-model")
+    assert not ipv4_forced()
+
+
+def test_ipv4_flag_forces_ipv4(gemini_env):
+    baseline.gemini_from_env(ipv4=True)
+    assert ipv4_forced()
+
+
+def test_ipv4_env_var_forces_ipv4(gemini_env, monkeypatch):
+    monkeypatch.setenv("GEMINI_FORCE_IPV4", "1")
+    baseline.gemini_from_env()
+    assert ipv4_forced()
+
+
+def test_ipv4_cli_flag_reaches_the_client_factory(two_scenarios, tmp_path, monkeypatch):
+    asked: list[bool] = []
+
+    def factory(ipv4=False):
+        asked.append(ipv4)
+        return FakeClient(answer_for(GS001), answer_for(GS007))
+
+    monkeypatch.setattr(baseline, "gemini_from_env", factory)
+    assert cli(two_scenarios, tmp_path / "out", None, "--ipv4") == 0
+    assert asked == [True]

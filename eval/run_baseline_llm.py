@@ -11,8 +11,9 @@ payable and refund all match the verified answer to the cent. Comparing this tab
 the engine's is the core evidence for "the LLM never does arithmetic".
 
 Config from the environment or the repo-root .env (git-ignored):
-    GEMINI_API_KEY   required
-    GEMINI_MODEL     default gemini-3.8-flash
+    GEMINI_API_KEY     required
+    GEMINI_MODEL       default gemini-3.8-flash
+    GEMINI_FORCE_IPV4  1 = connect over IPv4 only, same as --ipv4
 
 Every raw response is saved next to the results for audit. Scenarios are synthetic, so
 nothing here carries PII.
@@ -26,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import sys
 import time
 from collections import Counter
@@ -541,11 +543,31 @@ def configured_model() -> str:
     return os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
 
 
-def gemini_from_env() -> GeminiClient:
+def force_ipv4() -> None:
+    """Resolve every host to IPv4 addresses only, for this process.
+
+    On some networks IPv6 to Google is routed but dead: Python tries it first and each call
+    hangs until the timeout. Idempotent.
+    """
+    original = socket.getaddrinfo
+    if getattr(original, "ipv4_only", False):
+        return
+
+    def ipv4_only(host, port, family=0, *args, **kwargs):
+        return original(host, port, socket.AF_INET, *args, **kwargs)
+
+    ipv4_only.ipv4_only = True  # type: ignore[attr-defined]
+    socket.getaddrinfo = ipv4_only
+
+
+def gemini_from_env(ipv4: bool = False) -> GeminiClient:
     model = configured_model()
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise SystemExit("GEMINI_API_KEY is not set (add it to the repo-root .env)")
+    if ipv4 or os.environ.get("GEMINI_FORCE_IPV4", "").strip() == "1":
+        force_ipv4()
+        print("Connecting over IPv4 only")
     return GeminiClient(api_key, model)
 
 
@@ -582,11 +604,16 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
         action="store_true",
         help="combine all comparable runs into one table (no LLM calls unless --only-missing)",
     )
+    parser.add_argument(
+        "--ipv4",
+        action="store_true",
+        help="connect to the API over IPv4 only (if IPv6 hangs); or set GEMINI_FORCE_IPV4=1",
+    )
     args = parser.parse_args(argv)
 
     code = 0
     if args.only_missing or not args.merge:
-        client = client or gemini_from_env()
+        client = client or gemini_from_env(args.ipv4)
         skip: set[str] = set()
         if args.only_missing:
             scenarios = load_scenarios(args.scenarios)

@@ -55,6 +55,9 @@ accuracy, because it says nothing about the LLM's arithmetic. Wrong answers are 
 measured, so they don't fail the run; any API error does (exit 1), since the run is incomplete
 and its numbers shouldn't be reported. A full run takes about 2–3 minutes on the free tier.
 
+If calls hang until they time out, IPv6 to Google may be broken on your network: add
+`--ipv4`, or set `GEMINI_FORCE_IPV4=1` in `.env`, to connect over IPv4 only.
+
 #### Resuming an incomplete run
 
 ```bash
