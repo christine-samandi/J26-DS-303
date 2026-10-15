@@ -19,6 +19,7 @@ from typing import Annotated, Literal, TypedDict
 from j26_contracts.retrieval import RetrievalOutput
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from explanation_agent.models import Claim, Explanation, LlmCall  # noqa: F401  (re-exported)
 from tax_calculation_agent.engine import CalcResult, CalcStep
 from tax_calculation_agent.ruleset import RuleSet
 
@@ -94,21 +95,6 @@ class TaxpayerProfile(_Frozen):
     apit_paid: ProfileValue
 
 
-class Claim(_Frozen):
-    """One checkable statement in the explanation: which step it states and what cites it."""
-
-    claim_id: str
-    step_id: str
-    text: str
-    citation_refs: tuple[str, ...]
-
-
-class Explanation(_Frozen):
-    lines: tuple[str, ...]
-    claims: tuple[Claim, ...]
-    used_fallback: bool = False  # True when the LLM rewrite failed its post-check
-
-
 class ConfidenceBreakdown(_Frozen):
     """CLAUDE.md section 8, v1 formula. Every term is kept so the score can be audited."""
 
@@ -131,6 +117,8 @@ class PipelineTrace(_Frozen):
     retrieval_rule_ids: tuple[str, ...]
     calc_steps: tuple[CalcStep, ...]
     claims: tuple[Claim, ...]
+    explanation: Explanation  # what the user is shown, with used_fallback/hallucination_flag
+    llm_calls: tuple[LlmCall, ...]  # this attempt's LLM calls; empty when no LLM was used
     confidence: ConfidenceBreakdown
     conflicts: tuple[str, ...]
     warnings: tuple[str, ...]
@@ -163,6 +151,8 @@ class PipelineState(TypedDict, total=False):
     warnings: tuple[str, ...]
     calc: CalcResult
     explanation: Explanation
+    explain_warnings: tuple[str, ...]  # replaced on every explain run, unlike `warnings`
+    llm_calls: tuple[LlmCall, ...]
     confidence: ConfidenceBreakdown
     trace: PipelineTrace
     verdicts: tuple[AssuranceVerdict, ...]

@@ -17,6 +17,8 @@ extract -> normalise -> retrieve -> calculate -> explain -> score -> assure -> d
 - `stages.py`: each stage is a plain function. Only `graph.py` imports LangGraph (pinned), and a test enforces that.
 - `clients.py`: one adapter interface each for C2, C3 and C4, with mock versions that read `orchestrator/mock_data/`.
 - C3 uses the real `j26_contracts.retrieval` contract. C2 (`ocr_output`), C4 (`assurance_verdict`) and `pipeline_trace` use **provisional** C1-internal models in `models.py` until those contracts are agreed.
+- `explain` builds template text from the engine's steps. If `Deps.explainer_llm` is set, the LLM rewords it, and `explanation_agent`'s post-check rejects any changed number or citation, falling back to the template (`used_fallback`, `hallucination_flag`). Every LLM call goes into the trace's `llm_calls`, rejected output included.
+- `llm.py`: the Gemini client for the explainer (`GeminiTextLLM`), off by default. `explainer_llm_from_env()` turns it on with `C1_EXPLAINER_LLM=gemini` + `GEMINI_API_KEY` (optional `GEMINI_MODEL`, `C1_EXPLAINER_TIMEOUT_MS`, default 20000). Needs the `llm` extra; the only orchestrator module that imports an LLM SDK.
 - C3's rules are cross-checked against the seed rules. Any disagreement is shown in the result, lowers confidence, and sends the result for review.
 
 ```python
