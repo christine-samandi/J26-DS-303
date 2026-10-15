@@ -4,12 +4,16 @@ A rewrite passes only if it has one line per step, same step_ids, same order, an
   - states the step's result,
   - contains no number except the step's own figures (result, inputs, numbers in the
     template line), compared by value, so "1,200,000" and "1200000.00" are the same,
-  - writes no number in words ("1.2 million"),
+  - writes no number in words: zero to twenty, the tens, hundred / thousand / lakh /
+    million / billion / crore, and "percent" / "per cent" (the template writes "%"). A word
+    is allowed only where the step's template line already uses it ("not below zero"),
   - carries exactly the step's citation tags, each naming a rule in `rules_used`.
 
 Failures are split in two: a changed/added number or citation is a hallucination; a
 malformed reply (bad JSON, missing or reordered steps) is only a structural failure.
-Limitation: small numbers spelled out ("six percent") are not detected.
+The word check is deliberately strict: an innocent "one" ("no one") is also rejected, which
+costs a fallback to the template, never a wrong figure. Not detected: ordinals ("first"),
+fractions ("half") and multipliers ("twice").
 """
 
 from __future__ import annotations
@@ -24,7 +28,16 @@ from tax_calculation_agent.engine import CalcStep
 
 TAG = re.compile(r"\[([^\[\]]+)\]")
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
-_NUMBER_WORD = re.compile(r"\b(?:hundred|thousand|lakh|lakhs|million|billion|crore)s?\b", re.I)
+_UNITS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty"
+).split()
+_TENS = "thirty forty fifty sixty seventy eighty ninety".split()
+_SCALES = "hundred thousand lakh million billion crore".split()
+_NUMBER_WORD = re.compile(
+    r"\b(?:" + "|".join([*_UNITS, *_TENS, *(f"{w}s?" for w in _SCALES)]) + r"|per\s*cent)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +58,11 @@ class CheckResult:
 def numbers_in(text: str) -> list[Decimal]:
     """Every number written in digits, citation tags excluded (rule ids contain digits)."""
     return [Decimal(m.rstrip(",").replace(",", "")) for m in _NUMBER.findall(TAG.sub(" ", text))]
+
+
+def number_words_in(text: str) -> list[str]:
+    """Number words, lower-cased, with "per cent" normalised to "percent"."""
+    return [re.sub(r"\s+", "", w.lower()) for w in _NUMBER_WORD.findall(text)]
 
 
 def check(
@@ -78,8 +96,10 @@ def _check_line(step: CalcStep, template: str, text: str, rules_used: Collection
     for n in dict.fromkeys(found):
         if n not in allowed:
             problems.append(f"{sid}: {n} is not one of the engine's figures for this step")
-    if word := _NUMBER_WORD.search(text):
-        problems.append(f"{sid}: number written in words ({word.group(0)!r})")
+    in_template = set(number_words_in(template))
+    for word in dict.fromkeys(number_words_in(text)):
+        if word not in in_template:
+            problems.append(f"{sid}: number written in words ({word!r})")
 
     tags = TAG.findall(text)
     for tag in dict.fromkeys(tags):

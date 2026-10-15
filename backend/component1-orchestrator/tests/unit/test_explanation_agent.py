@@ -9,7 +9,7 @@ import pytest
 
 import explanation_agent
 from explanation_agent.explainer import PROMPT_VERSION, explain, template_lines
-from explanation_agent.post_check import numbers_in
+from explanation_agent.post_check import number_words_in, numbers_in
 from tax_calculation_agent.engine import calculate
 from tax_calculation_agent.ruleset import load_seed_rules
 
@@ -161,6 +161,36 @@ CHEATS = {
         f"Rs. 1,200,000 (1.2 million) is taxed [{RELIEF.rule_id}].",
         "number written in words",
     ),
+    "spelled-out rate": (
+        "S3_BAND_1",
+        f"The first Rs. 1,000,000 is taxed at six per cent: Rs. 60,000 [{BANDS.rule_id}].",
+        "number written in words ('six')",
+    ),
+    "per cent instead of %": (
+        "S3_BAND_2",
+        f"The next Rs. 200,000 is taxed at 18 per cent: Rs. 36,000 [{BANDS.rule_id}].",
+        "number written in words ('percent')",
+    ),
+    "percent instead of %": (
+        "S3_BAND_2",
+        f"The next Rs. 200,000 is taxed at 18 percent: Rs. 36,000 [{BANDS.rule_id}].",
+        "number written in words ('percent')",
+    ),
+    "tens word": (
+        "S4_TOTAL_TAX",
+        f"Your tax is Rs. 96,000, roughly thirty-two times your bus fare [{BANDS.rule_id}].",
+        "number written in words ('thirty')",
+    ),
+    "lakh": (
+        "S6_PAYABLE",
+        "You still owe Rs. 46,000, under half a lakh.",
+        "number written in words ('lakh')",
+    ),
+    "zero where the template has none": (
+        "S1_RELIEF",
+        f"The first Rs. 1,800,000 is taxed at zero [{RELIEF.rule_id}].",
+        "number written in words ('zero')",
+    ),
     "invented citation": (
         "S1_RELIEF",
         f"You get Rs. 1,800,000 tax-free [{RELIEF.rule_id}] [IRA s.52].",
@@ -245,3 +275,20 @@ def test_explanation_agent_imports_no_llm_sdk():
                 names = [node.module]
             found += [f"{path.name}: {n}" for n in names if n.split(".")[0] in banned]
     assert not found, f"LLM SDK imports in explanation_agent: {found}"
+
+
+def test_a_number_word_already_in_the_template_is_allowed():
+    # S2's template says "(not below zero)", so the rewrite may too
+    text = f"Rs. 3,000,000 less Rs. 1,800,000, never below zero: Rs. 1,200,000 [{RELIEF.rule_id}]."
+    outcome, _ = run(reply(S2_TAXABLE_INCOME=text))
+    assert not outcome.explanation.used_fallback
+
+
+def test_number_words_are_found_whole_and_case_insensitively():
+    assert number_words_in("Everyone, often, tense, oneself") == []
+    assert number_words_in("Twenty-Five Per  Cent of a MILLION") == [
+        "twenty",
+        "five",
+        "percent",
+        "million",
+    ]

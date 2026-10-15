@@ -21,15 +21,16 @@ from explanation_agent.models import Claim, Explanation, LlmCall
 from explanation_agent.post_check import TAG, check
 from tax_calculation_agent.engine import CalcStep
 
-PROMPT_VERSION = "explain-v1"
+PROMPT_VERSION = "explain-v2"  # v2: "%" and no number words
 PROMPT_TEMPLATE = """\
 You explain a Sri Lankan income tax calculation to a taxpayer who is not a tax expert.
 Below is one line per calculation step, as JSON. Rewrite each line in plain, friendly English,
 in one or two short sentences.
 
 Rules you must follow:
-- Keep every number exactly as it is. Do not add, remove, round or recompute any number,
-  and never write a number in words.
+- Keep every number exactly as it is. Do not add, remove, round or recompute any number.
+- Write numbers only in digits and percentages only with "%". Never use number words such as
+  "one", "zero", "twenty", "million" or "percent", even in phrases like "no one".
 - Keep every citation tag in square brackets, such as [RULE-ID], exactly as written and on
   the same line. Do not add any other square-bracket tags.
 - Keep one line per step, with the same step_id, in the same order.
