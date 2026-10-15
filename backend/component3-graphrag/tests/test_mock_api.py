@@ -10,6 +10,18 @@ from c3_common.contracts import OUTPUT_SCHEMA, contract_errors
 from retrieval_api.app import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _mock_mode(monkeypatch):
+    """These tests are about the mock backend, whatever C3_MODE a developer's .env sets."""
+    from types import SimpleNamespace
+
+    import retrieval_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_settings", lambda: SimpleNamespace(mode="mock"))
+
+
 MOCK_DIR = get_settings().contracts_dir / "mock_data" / "retrieval_output_examples"
 
 
