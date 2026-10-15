@@ -21,7 +21,8 @@ FIRST = "Amendment of the First Schedule to the principal enactment"
 RELIEF_CHUNKS = [
     _c("CHUNK-IRA-2017-SCH5-P002", "DOC-IRA-2017",
        "The reliefs referred to in section 52 shall be as follows: (a) Rs. 500,000 for each year "
-       "of assessment, except that an individual who is a trustee ...; (b) in the case of an "
+       "of assessment, except that an individual who is a trustee shall not be entitled to "
+        "deduct this personal relief as such trustee; (b) in the case of an "
        "individual with income from employment, Rs. 700,000 for each year of assessment;",
        schedule="FIFTH SCHEDULE", paragraph="2"),
     _c("CHUNK-IRA-AMEND-10-2021-S055-2", "DOC-IRA-AMEND-10-2021",

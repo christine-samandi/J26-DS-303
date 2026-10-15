@@ -38,3 +38,15 @@ No. 11 of 2026. Act No. 11 of 2026 was checked on its parsed text: its section 3
 First Schedule para 1(2)(a) (gains on investment assets, 10% to 15%), not the progressive
 bands in para 1(1); its sections 5 and 40 change qualifying payments (Fifth Schedule para 1),
 not personal relief (para 2).
+
+## Retrieval questions (Phase 5)
+
+`retrieval_questions.csv`: 24 dated questions about the two PP1 rules (dates in every version,
+including the first and last day of each) and 6 questions the system must refuse. Columns:
+`qid, question, as_of_date, expected_rule_key` (`none` = should refuse), `why`. The expected
+version is looked up from the version tables above by date, so the questions never state an
+answer. This is the **development set** (used while building retrieval).
+
+For an unbiased score, a **held-out set** in the same format
+(`retrieval_questions_heldout.csv`) is written by people who have not seen the system and is
+run once, without changing the code afterwards.

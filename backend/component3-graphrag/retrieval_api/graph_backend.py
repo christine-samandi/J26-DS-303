@@ -195,6 +195,17 @@ class Match:
     chunk_id: str | None  # best matching chunk
 
 
+NOT_INDIVIDUALS = {"company", "partnership", "trust", "charitable_institution"}
+
+
+def _asks_about_others(text: str) -> bool:
+    """The question names only taxpayers who are not individuals ("tax rate for companies")."""
+    from entity_recognition.extract import extract_entities
+
+    named = {e.value for e in extract_entities(text) if e.label == "TAXPAYER_CATEGORY"}
+    return bool(named) and named <= NOT_INDIVIDUALS
+
+
 def _rule_matches(req: RetrievalRequest, data: GraphData) -> dict[str, Match]:
     """rule_key -> how well the rule matches the request (before looking at dates)."""
     keys = {v["rule_key"]: v["rule"] for v in data.versions}
@@ -204,6 +215,8 @@ def _rule_matches(req: RetrievalRequest, data: GraphData) -> dict[str, Match]:
                 if wanted & RATE_TYPES.get(r["rule_type"], {r["rule_type"]})}  # fmt: skip
     if not req.query_text:
         return {k: Match(1.0, 1.0, 1.0, None) for k in keys}
+    if _asks_about_others(req.query_text):  # both modelled rules are for individuals
+        return {}
 
     text = req.query_text.lower()
     matches = {}

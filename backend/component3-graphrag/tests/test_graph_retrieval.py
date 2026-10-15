@@ -51,7 +51,7 @@ def _ask(data, text=None, day="2024-06-01", **kw):
     ],
 )
 def test_the_version_in_force_on_the_date_is_returned(data, day, rule_id, amount):
-    out = _ask(data, "What personal relief can I claim?", day)
+    out = _ask(data, "What is the personal relief?", day)
     (top,) = out.results
     assert (top.rule_id, top.values.amount.amount) == (rule_id, amount)
     assert top.validity.in_force_on_as_of_date and top.confidence.level == "high"

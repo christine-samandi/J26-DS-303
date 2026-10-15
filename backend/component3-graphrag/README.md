@@ -101,6 +101,13 @@ python -m retrieval_api.graph_backend "tax slabs" --date 2021-06-01 --history
 Set `C3_MODE=graphrag` in `.env` to make the API below answer from the graph instead of the
 mock examples (restart the API after rebuilding the graph).
 
+**Phase 5: evaluate retrieval (GraphRAG vs flat RAG)**
+```bash
+python -m evaluation.retrieval                  # questions in ground_truth/retrieval_questions.csv
+python -m evaluation.retrieval --questions ground_truth/retrieval_questions_heldout.csv
+```
+Scores -> `data/evaluation/retrieval_scores.json` and `retrieval_per_question.csv`.
+
 **Run the retrieval API**
 ```bash
 uvicorn retrieval_api.app:app --reload --port 8003

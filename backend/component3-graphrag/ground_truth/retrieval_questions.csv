@@ -1,0 +1,31 @@
+qid,question,as_of_date,expected_rule_key,why
+Q01,What personal relief could I claim in June 2019?,2019-06-01,personal_relief,V1 period
+Q02,How much is the personal relief for an individual on 31 December 2019?,2019-12-31,personal_relief,last day of V1
+Q03,What is the tax free personal relief from 1 January 2020?,2020-01-01,personal_relief,first day of V2 (retrospective Act of 2021)
+Q04,Personal relief amount for a resident individual in 2021,2021-06-01,personal_relief,V2 period
+Q05,What personal relief applies to my income in mid 2022?,2022-06-01,personal_relief,split year 2022/23: first nine months
+Q06,What was the personal relief on 31 December 2022?,2022-12-31,personal_relief,last day of V2
+Q07,Personal relief allowed on 1 January 2023,2023-01-01,personal_relief,first day of V3 (annualised from the split year)
+Q08,What personal relief can I claim for the 2024/25 year of assessment?,2024-06-01,personal_relief,V3 period
+Q09,How much personal relief on 31 March 2025?,2025-03-31,personal_relief,last day of V3
+Q10,What is the personal relief from April 2025?,2025-04-01,personal_relief,first day of V4
+Q11,Tax free allowance for individuals in January 2026,2026-01-15,personal_relief,V4 period
+Q12,What personal relief can I claim now?,2026-10-01,personal_relief,V4 still in force
+Q13,What were the income tax rates for individuals in June 2019?,2019-06-01,individual_income_tax_slabs,B1 period
+Q14,Tax slabs for individuals on 31 December 2019,2019-12-31,individual_income_tax_slabs,last day of B1
+Q15,Which tax bands applied to individuals from 1 January 2020?,2020-01-01,individual_income_tax_slabs,first day of B2
+Q16,How much tax do I pay on my salary in 2021?,2021-06-01,individual_income_tax_slabs,B2 period
+Q17,Individual income tax rate table in mid 2022,2022-06-01,individual_income_tax_slabs,split year 2022/23: first nine months
+Q18,Tax brackets for a resident individual on 31 December 2022,2022-12-31,individual_income_tax_slabs,last day of B2
+Q19,What are the progressive tax rates from 1 January 2023?,2023-01-01,individual_income_tax_slabs,first day of B3 (annualised quarterly bands)
+Q20,Income tax slabs for the 2024/25 year of assessment,2024-06-01,individual_income_tax_slabs,B3 period
+Q21,What tax rates applied to individuals on 31 March 2025?,2025-03-31,individual_income_tax_slabs,last day of B3
+Q22,New income tax bands from April 2025,2025-04-01,individual_income_tax_slabs,first day of B4
+Q23,How much income tax does an individual pay in 2026?,2026-01-15,individual_income_tax_slabs,B4 period
+Q24,What are the current tax slabs for individuals?,2026-10-01,individual_income_tax_slabs,B4 still in force
+N01,What is the VAT rate on goods?,2025-06-01,none,VAT is a different Act (not in the corpus)
+N02,What is the customs duty on imported cars?,2025-06-01,none,customs is not income tax
+N03,What is the penalty for filing a tax return late?,2025-06-01,none,in the Act but not a modelled rule
+N04,What is the income tax rate for companies?,2025-06-01,none,company rates are not the individual bands
+N05,What relief does a senior citizen get on interest income?,2025-06-01,none,Fifth Schedule para 2(d): a different relief from personal relief (not modelled)
+N06,How do I register a vehicle?,2025-06-01,none,unrelated question

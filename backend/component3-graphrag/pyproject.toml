@@ -54,6 +54,7 @@ include = [
     "knowledge_graph*",
     "vector_store*",
     "retrieval_api*",
+    "evaluation*",
 ]
 
 [tool.pytest.ini_options]
