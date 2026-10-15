@@ -45,13 +45,38 @@ retry on a malformed reply. The results record the model that was requested, the
 version that actually answered, and the prompt version. Raw replies are saved to
 `results/baseline_llm_*.raw.jsonl`.
 
-Calls are spaced to `--rpm` requests per minute (default 5, the Gemini free tier). Rate-limit
-and overload errors (429/500/503) are retried up to 4 times, waiting as long as the API asks,
-except the daily quota, which only resets at midnight Pacific.
+Calls are spaced to `--rpm` requests per minute (default 5, the Gemini free tier). Every
+failed call still spends the daily quota (20 requests per model on the free tier), so retries
+are few: overload errors (503/504) are retried once after at least 60 s; the per-minute rate
+limit (429) and 500 up to 3 times, waiting as long as the API asks. The daily quota is never
+retried, as it only resets at midnight Pacific.
 A scenario that still gets no answer is an API error: it is listed separately and excluded from
 accuracy, because it says nothing about the LLM's arithmetic. Wrong answers are the result being
 measured, so they don't fail the run; any API error does (exit 1), since the run is incomplete
 and its numbers shouldn't be reported. A full run takes about 2–3 minutes on the free tier.
+
+#### Resuming an incomplete run
+
+```bash
+python eval/run_baseline_llm.py --only-missing --merge   # ask only what has no answer yet
+python eval/run_baseline_llm.py --merge                  # combine runs, no LLM calls
+```
+
+`--only-missing` asks only the scenarios that got no answer (an API error) in every earlier
+run. `--merge` writes `results/baseline_merged_*.{md,csv,raw.jsonl}`: one table with the
+earliest answer per scenario and the run it came from (`source_run`, "Answer from"). Answers
+are re-scored against the current scenarios.
+
+Only comparable runs are reused, and the script prints why any other run was skipped:
+
+- same model requested and same prompt version, and the same prompt text (each run saves a
+  `.meta.json` with a hash of the prompt; older runs are read from their markdown header);
+- from a clean commit (no `-dirty` SHA);
+- scored with API errors kept apart from wrong answers (runs before `44c5136` are not);
+- the scenario's expected totals unchanged since (a corrected hand calculation is asked again).
+
+An unparseable reply is a real answer (counted wrong) and is never asked again. The earliest
+answer always wins, never the best one, so resuming cannot cherry-pick results.
 
 ## Scenario format
 
