@@ -19,6 +19,7 @@ from typing import Annotated, Literal, TypedDict
 from j26_contracts.retrieval import RetrievalOutput
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from explanation_agent.models import Claim, Explanation  # noqa: F401  (re-exported)
 from tax_calculation_agent.engine import CalcResult, CalcStep
 from tax_calculation_agent.ruleset import RuleSet
 
@@ -92,21 +93,6 @@ class TaxpayerProfile(_Frozen):
 
     employment_income: ProfileValue
     apit_paid: ProfileValue
-
-
-class Claim(_Frozen):
-    """One checkable statement in the explanation: which step it states and what cites it."""
-
-    claim_id: str
-    step_id: str
-    text: str
-    citation_refs: tuple[str, ...]
-
-
-class Explanation(_Frozen):
-    lines: tuple[str, ...]
-    claims: tuple[Claim, ...]
-    used_fallback: bool = False  # True when the LLM rewrite failed its post-check
 
 
 class ConfidenceBreakdown(_Frozen):
