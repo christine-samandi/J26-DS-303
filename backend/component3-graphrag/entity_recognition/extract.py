@@ -159,6 +159,20 @@ def _nlp():
     return nlp, matcher, terms
 
 
+def _head_income_type_first(spans: list) -> list:
+    """Between two overlapping INCOME_TYPE terms, keep the one that starts first.
+
+    In "rental income from an investment asset" the type is named by the head words
+    ("rental income"); "income from an investment" only says where it comes from. Without
+    this, filter_spans would keep the longer, wrong span (error found in the evaluation).
+    """
+    income = [s for s in spans if s.label_ == "INCOME_TYPE"]
+    drop = {
+        id(later) for first in income for later in income if first.start < later.start < first.end
+    }
+    return [s for s in spans if id(s) not in drop]
+
+
 def extract_entities(text: str) -> list[Entity]:
     from spacy.util import filter_spans
 
@@ -184,6 +198,7 @@ def extract_entities(text: str) -> list[Entity]:
         meta[(start, end, label)] = ("lexicon", confidence, value, span.start_char, span.end_char)
         spans.append(span)
 
+    spans = _head_income_type_first(spans)
     entities = []
     for span in sorted(filter_spans(spans) + filter_spans(slabs), key=lambda s: s.start_char):
         rule, confidence, value, start, end = meta[(span.start, span.end, span.label_)]

@@ -27,9 +27,9 @@ The models also enforce rules JSON Schema cannot express:
 |---|---|---|
 | Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
 | Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (full Act series: 2017 Act + 6 amendments; parser tuned on the real PDFs: 379/379 sections, all 6 schedules) |
-| Ground truth (rule versions) | `ground_truth/` | ✅ personal relief V1–V4, tax bands B1–B4 (B1 steps pending check) |
-| Entity extraction (spaCy + regex) | `entity_recognition/` | 🔄 Phase 2: chunking + 10 entity types done; amendments, classification, evaluation next |
-| Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ⏳ Phase 3 (connection helper ready) |
+| Ground truth | `ground_truth/` | ✅ rule versions (personal relief V1–V4, tax bands B1–B4, all verified); entity answer key (10 core chunks, 246 entities) |
+| Entity extraction (spaCy + regex) | `entity_recognition/` | ✅ Phase 2: 1,324 chunks, 10 entity types; blind P 0.97 / R 1.00, adjudicated P = R = 0.996 (10 core chunks) |
+| Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ✅ Phase 3: rule versions rebuilt from the Acts (8/8 exact); graph builder |
 | Vector store (ChromaDB) | `vector_store/` | ⏳ Phase 4 |
 | GraphRAG retrieval | `retrieval_api/` | ⏳ Phase 4 |
 
@@ -79,6 +79,19 @@ docker compose up -d
 python -m knowledge_graph.connection   # → "Connected to Neo4j Kernel 5.x ..."
 ```
 Neo4j Browser: http://localhost:7474 (user `neo4j`, password from `.env`).
+
+**Phase 3: rule versions and the knowledge graph**
+```bash
+python -m knowledge_graph.versions     # rebuild rule histories from the Acts, score vs ground_truth/
+pip install -e ".[graph]"
+python -m knowledge_graph.build        # (re)build the whole graph in Neo4j (--dry-run: no database)
+```
+Try in Neo4j Browser:
+```cypher
+MATCH (v:RuleVersion)-[:VERSION_OF]->(:Rule {rule_key:'personal_relief'})
+OPTIONAL MATCH (v)-[:DEFINED_IN]->(c:Chunk)
+RETURN v, c
+```
 
 **Run the retrieval API**
 ```bash

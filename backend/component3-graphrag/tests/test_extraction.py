@@ -216,3 +216,10 @@ def test_extract_corpus_writes_json(tmp_path):
     data = json.loads((tmp_path / "extracted" / "DOC-IRA-2017.json").read_text(encoding="utf-8"))
     sch = next(c for c in data["chunks"] if c["chunk_id"] == "CHUNK-IRA-2017-SCH5-P002")
     assert {"label": "AMOUNT", "value": 500000}.items() <= sch["entities"][-1].items()
+
+
+def test_income_type_is_named_by_its_head_words():
+    # found in the evaluation: "income from an investment" was tagged inside this phrase
+    found = _found("an individual with rental income from an investment asset")
+    assert ("INCOME_TYPE", "rental income", "investment") in found
+    assert not [t for label, t, _ in found if t == "income from an investment"]
