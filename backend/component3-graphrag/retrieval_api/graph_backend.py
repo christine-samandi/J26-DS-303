@@ -110,7 +110,8 @@ def from_neo4j(driver) -> GraphData:
     rows, _, _ = driver.execute_query(VERSIONS_QUERY)
     versions = []
     for r in rows:
-        v = {k: _native(x) for k, x in r["v"].items()}
+        # Neo4j does not store null properties: a missing valid_to / amount means null
+        v = {"valid_to": None, "amount": None} | {k: _native(x) for k, x in r["v"].items()}
         versions.append(
             v | {"rule": r["rule"], "doc": {k: _native(x) for k, x in r["doc"].items()},
                  "chunk": r["chunk"], "bands": sorted(r["bands"], key=lambda b: b["order"]),

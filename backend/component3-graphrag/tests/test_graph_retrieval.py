@@ -143,13 +143,14 @@ class _Date:
 
 
 class _FakeDriver:
-    """Answers the three retrieval queries the way Neo4j would (records as dicts)."""
+    """Answers the three retrieval queries the way Neo4j would (records as dicts). Like Neo4j,
+    it leaves out properties that are null (no valid_to for the version in force)."""
 
     def execute_query(self, query):
         if "collect(DISTINCT b" in query:
             return [{
                 "v": {"rule_id": "RULE-PERSONAL_RELIEF-V1", "rule_key": "personal_relief",
-                      "valid_from": _Date("2018-04-01"), "valid_to": None, "status": "active",
+                      "valid_from": _Date("2018-04-01"), "status": "active",
                       "amount": 500000, "matched_text": "Rs. 500,000 for each year of assessment",
                       "source_document_id": "DOC-IRA-2017",
                       "income_types": ["employment"]},
