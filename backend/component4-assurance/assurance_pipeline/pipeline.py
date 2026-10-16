@@ -12,7 +12,11 @@ from decision_engine.engine import (
     AssuranceDecision,
     decide_assurance_action,
 )
-
+from citation_verifier.verifier import (
+    CitationClaim,
+    EvidenceSource,
+    verify_citation,
+)
 
 @dataclass(frozen=True)
 class AssuranceResult:
@@ -56,6 +60,30 @@ def assure_line_item_total(
     finding = check_line_item_sum(
         reported_total=reported_total,
         line_items=line_items,
+    )
+
+    findings = (finding,)
+
+    decision = decide_assurance_action(
+        findings=findings,
+        regeneration_attempts=regeneration_attempts,
+    )
+
+    return AssuranceResult(
+        findings=findings,
+        decision=decision,
+    )
+
+def assure_citation(
+    claim: CitationClaim,
+    sources: Sequence[EvidenceSource],
+    regeneration_attempts: int = 0,
+) -> AssuranceResult:
+    """Run citation traceability verification and risk-based decision-making."""
+
+    finding = verify_citation(
+        claim=claim,
+        sources=sources,
     )
 
     findings = (finding,)
