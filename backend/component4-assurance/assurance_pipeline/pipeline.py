@@ -1,9 +1,11 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Sequence
 
 from consistency_checker.checker import (
     VerificationFinding,
+    check_line_item_sum,
     check_total_consistency,
 )
 from decision_engine.engine import (
@@ -30,6 +32,30 @@ def assure_tax_total(
     finding = check_total_consistency(
         reported_total=reported_total,
         calculated_total=calculated_total,
+    )
+
+    findings = (finding,)
+
+    decision = decide_assurance_action(
+        findings=findings,
+        regeneration_attempts=regeneration_attempts,
+    )
+
+    return AssuranceResult(
+        findings=findings,
+        decision=decision,
+    )
+
+def assure_line_item_total(
+    reported_total: Decimal,
+    line_items: Sequence[Decimal],
+    regeneration_attempts: int = 0,
+) -> AssuranceResult:
+    """Verify a reported total against independently summed line items."""
+
+    finding = check_line_item_sum(
+        reported_total=reported_total,
+        line_items=line_items,
     )
 
     findings = (finding,)
