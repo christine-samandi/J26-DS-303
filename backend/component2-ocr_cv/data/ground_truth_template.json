@@ -1,0 +1,20 @@
+{
+  "doc_id": "PS_001",
+  "document_type": "payslip",
+  "source": "real",
+  "languages": ["en"],
+  "fields": {
+    "issuer": null,
+    "pay_period": null,
+    "gross_income": null,
+    "epf_employee": null,
+    "epf_employer": null,
+    "etf": null,
+    "apit": null,
+    "total_deductions": null,
+    "net_amount": null
+  },
+  "full_text": "",
+  "checked": false,
+  "notes": "Amounts as plain numbers (150000.00, no commas). pay_period as YYYY-MM, dates as YYYY-MM-DD. null = not on the document."
+}
