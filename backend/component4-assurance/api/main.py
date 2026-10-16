@@ -10,9 +10,11 @@ from pydantic import (
 )
 
 from assurance_pipeline.pipeline import (
+    assure_citation,
     assure_line_item_total,
     assure_tax_total,
 )
+from citation_verifier.verifier import CitationClaim, EvidenceSource
 
 
 app = FastAPI(
@@ -91,6 +93,61 @@ class LineItemCheckRequest(BaseModel):
             raise ValueError("All line items must be finite.")
         return values
 
+
+class CitationClaimRequest(BaseModel):
+    """A generated claim with its citation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(min_length=1)
+    source_id: str | None = None
+    excerpt: str | None = None
+
+    @field_validator("claim_id")
+    @classmethod
+    def validate_claim_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Claim ID cannot be empty.")
+        return value
+
+
+class EvidenceSourceRequest(BaseModel):
+    """An evidence source available for verification."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1)
+    text: str
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Source ID cannot be empty.")
+        return value
+
+
+class CitationCheckRequest(BaseModel):
+    """Complete request for citation assurance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim: CitationClaimRequest
+    sources: list[EvidenceSourceRequest]
+    regeneration_attempts: int = Field(default=0, ge=0)
+
+    @field_validator("sources")
+    @classmethod
+    def validate_unique_sources(
+        cls,
+        sources: list[EvidenceSourceRequest],
+    ) -> list[EvidenceSourceRequest]:
+        source_ids = [source.source_id for source in sources]
+
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Duplicate source ID detected.")
+
+        return sources
 
 class FindingResponse(BaseModel):
     check_name: str
@@ -172,6 +229,66 @@ def verify_line_item_total(request: LineItemCheckRequest):
     result = assure_line_item_total(
         reported_total=request.reported_total,
         line_items=request.line_items,
+        regeneration_attempts=request.regeneration_attempts,
+    )
+
+    findings = [
+        FindingResponse(
+            check_name=finding.check_name,
+            passed=finding.passed,
+            message=finding.message,
+            severity=finding.severity.value,
+            error_code=finding.error_code.value,
+            expected_value=(
+                str(finding.expected_value)
+                if finding.expected_value is not None
+                else None
+            ),
+            actual_value=(
+                str(finding.actual_value)
+                if finding.actual_value is not None
+                else None
+            ),
+        )
+        for finding in result.findings
+    ]
+
+    decision = DecisionResponse(
+        action=result.decision.action.value,
+        reason=result.decision.reason,
+        failed_checks=result.decision.failed_checks,
+    )
+
+    return AssuranceResponse(
+        findings=findings,
+        decision=decision,
+    )
+
+
+@app.post(
+    "/assurance/citation-check",
+    response_model=AssuranceResponse,
+)
+def verify_claim_citation(request: CitationCheckRequest):
+    """Verify citation traceability and return an assurance decision."""
+
+    claim = CitationClaim(
+        claim_id=request.claim.claim_id,
+        source_id=request.claim.source_id,
+        excerpt=request.claim.excerpt,
+    )
+
+    sources = [
+        EvidenceSource(
+            source_id=source.source_id,
+            text=source.text,
+        )
+        for source in request.sources
+    ]
+
+    result = assure_citation(
+        claim=claim,
+        sources=sources,
         regeneration_attempts=request.regeneration_attempts,
     )
 
