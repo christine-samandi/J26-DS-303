@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.1",
+  "doc_id": "MOCK_PS_01",
+  "document_type": "payslip",
+  "languages": ["si", "en"],
+  "extracted_fields": [
+    {"field_name": "issuer", "value": "Lanka Textiles (Pvt) Ltd", "raw_text": "Lanka Textiles (Pvt) Ltd", "confidence": 0.97, "bbox": [120, 40, 520, 48], "tax_entity": "EMPLOYER", "needs_review": false},
+    {"field_name": "gross_income", "value": 150000.0, "raw_text": "150,000.00", "confidence": 0.98, "bbox": [610, 410, 160, 32], "tax_entity": "EMPLOYMENT_INCOME", "needs_review": false},
+    {"field_name": "epf_employee", "value": 12000.0, "raw_text": "12,000.00", "confidence": 0.96, "bbox": [610, 470, 150, 32], "tax_entity": "EPF_EMPLOYEE_CONTRIBUTION", "needs_review": false},
+    {"field_name": "etf", "value": 4500.0, "raw_text": "4,5O0.00", "confidence": 0.81, "bbox": [610, 530, 140, 32], "tax_entity": "ETF_EMPLOYER_CONTRIBUTION", "needs_review": true},
+    {"field_name": "apit", "value": 3500.0, "raw_text": "3,500.00", "confidence": 0.95, "bbox": [610, 590, 140, 32], "tax_entity": "APIT_WITHHELD", "needs_review": false},
+    {"field_name": "net_amount", "value": 134500.0, "raw_text": "134,500.00", "confidence": 0.99, "bbox": [610, 700, 170, 34], "tax_entity": "NET_PAY", "needs_review": false}
+  ],
+  "overall_confidence": 0.81,
+  "needs_review": true,
+  "engine": "tesseract-5",
+  "processing_ms": 2140
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://j26-ds-303/contracts/schemas/ocr_output_schema.json",
+  "title": "Component 2 OCR output",
+  "description": "v0.1 - contract between Component 2 (OCR & CV) and Components 1, 3, 4. Changes are logged in contracts/CONTRACT_CHANGELOG.md.",
+  "type": "object",
+  "required": ["schema_version", "doc_id", "document_type", "languages", "extracted_fields", "overall_confidence", "needs_review"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "doc_id": { "type": "string" },
+    "document_type": { "enum": ["payslip", "bank_statement", "invoice", "receipt", "unknown"] },
+    "languages": {
+      "type": "array",
+      "items": { "enum": ["si", "ta", "en"] },
+      "uniqueItems": true
+    },
+    "extracted_fields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/field" }
+    },
+    "overall_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "needs_review": { "type": "boolean" },
+    "engine": { "type": "string", "description": "OCR engine(s) used, e.g. tesseract-5" },
+    "processing_ms": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "required": ["field_name", "value", "confidence", "bbox", "needs_review"],
+      "additionalProperties": false,
+      "properties": {
+        "field_name": {
+          "enum": ["issuer", "pay_period", "document_date", "gross_income", "epf_employee", "epf_employer",
+                   "etf", "apit", "vat", "sscl", "total_deductions", "net_amount", "total_amount"]
+        },
+        "value": { "type": ["number", "string", "null"] },
+        "raw_text": { "type": "string", "description": "Text exactly as read by OCR, before normalisation" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bbox": {
+          "type": "array",
+          "description": "[x, y, w, h] in pixels of the ORIGINAL uploaded image",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "tax_entity": { "type": "string", "description": "Ontology entity, e.g. EPF_EMPLOYEE_CONTRIBUTION" },
+        "needs_review": { "type": "boolean", "description": "true when confidence < 0.95" }
+      }
+    }
+  }
+}
