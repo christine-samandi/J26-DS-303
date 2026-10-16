@@ -18,3 +18,7 @@ One entry per decision. Format: date · decision · chosen · rejected · reason
 | 2026-10-16 | Rotation fill | Median background brightness | Pure white; replicate edge | White leaves a seam; replicate creates streaks read as dashes |
 | 2026-10-16 | bbox traceability | Every geometric step stored as a 3×3 homography; boxes mapped back with its inverse | Re-running OCR on the original | Keeps contract rule "bbox in original-image pixels" while OCR runs on the cleaned image |
 | 2026-10-16 | Ablation support | `preprocess(img, steps=...)` with named, switchable steps | Fixed pipeline | Needed for experiment E1 (contribution of each step) |
+| 2026-10-16 | Dataset split | Per document, stratified by type, every 3rd document → test (≥1 test doc per type); existing splits never move | Random per-image split | Photos of the same document on both sides would leak answers into the test score |
+| 2026-10-16 | Ground-truth format | One JSON per document, same field names as the output schema, validated by docs/ground_truth_schema.json | Spreadsheet of values | Direct comparison with predictions; schema catches typos such as "150,000" typed as text |
+| 2026-10-16 | Ground-truth checking | Automatic payslip arithmetic check (gross − deductions = net) on hand-typed values | Trusting manual entry | A wrong answer key silently lowers every accuracy number |
+| 2026-10-16 | File naming | `<DOC_ID>_<capture>.<ext>` (e.g. PS_001_photo_dark.jpg) | Free names + manual manifest | Manifest is generated, so capture condition and document id can never disagree |
