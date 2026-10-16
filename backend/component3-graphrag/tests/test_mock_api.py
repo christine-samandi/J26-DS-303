@@ -121,3 +121,7 @@ def test_invalid_request_explains_which_field():
     )
     assert res.status_code == 422
     assert res.json()["detail"][0]["loc"][-1] == "top_k"
+
+
+def test_reload_in_mock_mode():
+    assert client.post("/reload").json()["status"] == "ok"

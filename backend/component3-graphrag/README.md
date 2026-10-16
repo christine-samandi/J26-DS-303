@@ -93,6 +93,12 @@ OPTIONAL MATCH (v)-[:DEFINED_IN]->(c:Chunk)
 RETURN v, c
 ```
 
+**Adding a newly published Act** (no full rebuild; see `DEMO.md`)
+```bash
+python -m knowledge_graph.build --until 2025-01-01      # the graph as it was known before 2025
+python -m knowledge_graph.update DOC-IRA-AMEND-02-2025  # new Act -> new versions + change report
+```
+
 **Phase 4: ask the graph (Neo4j running, graph built)**
 ```bash
 python -m retrieval_api.graph_backend "What personal relief can I claim?" --date 2024-06-01

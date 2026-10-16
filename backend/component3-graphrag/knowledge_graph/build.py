@@ -33,6 +33,7 @@ import re
 import sys
 import time
 from collections import Counter
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from knowledge_graph.versions import RULES, Version, build_versions
@@ -106,6 +107,11 @@ def amended_provision(chunk: dict, leads: dict[tuple[str, str], str]) -> str | N
     return _seg(PRINCIPAL, schedule=ORDINALS.index(m[1].lower()) + 1, paragraph=para[1])
 
 
+def known_documents(documents: list, until: date | None = None) -> list:
+    """The registry documents certified on or before `until` (all of them if None)."""
+    return [d for d in documents if until is None or d.certified_date <= until]
+
+
 def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents: list) -> dict:
     """Everything the graph holds, as plain rows (no database needed: easy to test)."""
     known_segments = {c["segment_id"] for c in chunks}
@@ -123,7 +129,7 @@ def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents
         rows["documents"].append({
             "document_id": d.document_id, "title": d.title, "document_type": d.document_type,
             "act_number": d.act_number, "certified_date": d.certified_date.isoformat(),
-            "url": d.url,
+            "url": d.url, "ingested_at": datetime.now(UTC).isoformat(timespec="seconds"),
         })  # fmt: skip
 
     seen_provisions = set()
@@ -272,16 +278,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the C3 knowledge graph in Neo4j.")
     parser.add_argument("--dry-run", action="store_true", help="count rows, do not connect")
     parser.add_argument("--keep", action="store_true", help="do not delete the existing graph")
+    parser.add_argument(
+        "--until",
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="only the Acts certified on or before this date (the corpus as it was known then)",
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
-    chunks = load_extracted(settings.extracted_dir)
+    documents = known_documents(load_registry().documents, args.until)
+    doc_ids = {d.document_id for d in documents}
+    chunks = [c for c in load_extracted(settings.extracted_dir) if c["document_id"] in doc_ids]
     if not chunks:
         print("No extracted chunks. Run: python -m entity_recognition.extract")
         return 1
     started = time.perf_counter()
-    versions = build_versions(load_chunks(settings.processed_dir))
-    rows = graph_rows(chunks, versions, load_registry().documents)
+    parsed = [c for c in load_chunks(settings.processed_dir) if c.document_id in doc_ids]
+    versions = build_versions(parsed)
+    rows = graph_rows(chunks, versions, documents)
+    if args.until:
+        print(f"Acts certified on or before {args.until}: " + ", ".join(sorted(doc_ids)))
     print(summary(rows))
     if args.dry_run:
         return 0
