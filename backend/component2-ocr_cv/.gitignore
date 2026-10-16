@@ -1,0 +1,14 @@
+# real and personal documents never go to GitHub (NFR4)
+data/images/
+data/raw/
+data/ground_truth/
+data/manifest.csv
+outputs/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Claude Code (personal, not shared)
+CLAUDE.md
+.claude/
