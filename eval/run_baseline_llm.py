@@ -3,12 +3,17 @@
     python eval/run_baseline_llm.py [--scenarios eval/scenarios] [--out eval/results]
     python eval/run_baseline_llm.py --only-missing [--merge]   # resume after API errors
     python eval/run_baseline_llm.py --merge                    # combine runs, no LLM calls
+    python eval/run_baseline_llm.py --prompt-variant no-rules  # any of the above, no rules
 
-For each golden scenario the LLM gets the same YA rules the engine gets (relief + bands,
-from the seed rules) and the scenario input, and must answer the four totals as JSON.
+For each golden scenario the LLM must answer the four totals as JSON. Two prompt variants:
+    with-rules (default)  the same YA rules the engine gets (relief + bands, from the seed
+                          rules) and the scenario input
+    no-rules              only the year of assessment, employment income and APIT paid; the
+                          LLM must apply the Inland Revenue Act from its own knowledge
 Scored exactly like run_engine.py: a scenario passes only if taxable income, total tax,
 payable and refund all match the verified answer to the cent. Comparing this table with
-the engine's is the core evidence for "the LLM never does arithmetic".
+the engine's is the core evidence for "the LLM never does arithmetic". Runs of different
+variants are written under different file prefixes and are never combined.
 
 Config from the environment or the repo-root .env (git-ignored):
     GEMINI_API_KEY     required
@@ -85,6 +90,64 @@ Taxpayer:
 Answer with JSON only, no other text, in exactly this form (plain numbers in LKR, no commas):
 {{"taxable_income": <number>, "total_tax": <number>, "tax_payable": <number>, "refund": <number>}}
 """
+
+# Gives no rate, band, relief or section: the model must know the law itself. The output
+# fields are still defined, so a wrong answer means wrong tax law, not a misread field.
+NO_RULES_PROMPT_VERSION = "baseline-no-rules-v1"
+NO_RULES_PROMPT_TEMPLATE = """\
+You are a Sri Lankan income tax calculator. Compute the income tax of a resident individual
+for the year of assessment {ya} under the Inland Revenue Act No. 24 of 2017, as amended and
+in force for that year of assessment. No rules are given here: apply the law from your own
+knowledge.
+
+Taxpayer (employment income is the only income for the year):
+- Employment income: Rs. {income}
+- APIT paid: Rs. {apit}
+
+Answer with JSON only, no other text, in exactly this form (plain numbers in LKR, to the
+cent, no commas):
+{{"taxable_income": <number>, "total_tax": <number>, "tax_payable": <number>, "refund": <number>}}
+where:
+- taxable_income: the taxable income for the year of assessment
+- total_tax: the income tax on that taxable income, before crediting the APIT paid
+- tax_payable: the tax still due after crediting the APIT paid, or 0 if none is due
+- refund: the APIT paid in excess of total_tax, or 0 if there is no excess
+"""
+
+
+@dataclass(frozen=True)
+class PromptVariant:
+    name: str
+    version: str
+    template: str
+    run_prefix: str  # results file stems; distinct per variant so runs never share a glob
+    merged_prefix: str
+    description: str  # for the markdown header
+
+
+VARIANTS = {
+    v.name: v
+    for v in (
+        PromptVariant(
+            "with-rules",
+            PROMPT_VERSION,
+            PROMPT_TEMPLATE,
+            "baseline_llm_",
+            "baseline_merged_",
+            "seed rules given in the prompt",
+        ),
+        PromptVariant(
+            "no-rules",
+            NO_RULES_PROMPT_VERSION,
+            NO_RULES_PROMPT_TEMPLATE,
+            "baseline_norules_llm_",
+            "baseline_norules_merged_",
+            "no rules given, the model applies the Act from its own knowledge",
+        ),
+    )
+}
+DEFAULT_VARIANT = "with-rules"
+WITH_RULES = VARIANTS[DEFAULT_VARIANT]
 
 
 class LLMClient(Protocol):
@@ -197,6 +260,20 @@ def build_prompt(scenario: dict, rules: RuleSet) -> str:
     )
 
 
+def build_no_rules_prompt(scenario: dict) -> str:
+    return NO_RULES_PROMPT_TEMPLATE.format(
+        ya=scenario["year_of_assessment"],
+        income=scenario["input"]["employment_income"],
+        apit=scenario["input"]["apit_paid"],
+    )
+
+
+def prompt_for(scenario: dict, variant: PromptVariant) -> str:
+    if variant.name == "no-rules":
+        return build_no_rules_prompt(scenario)
+    return build_prompt(scenario, load_seed_rules(scenario["year_of_assessment"]))
+
+
 def parse_answer(text: str) -> dict[str, Decimal]:
     """The four totals as Decimal, or ValueError if the reply isn't the JSON we asked for."""
     cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
@@ -224,9 +301,11 @@ def score(outcome: Outcome) -> None:
             )
 
 
-def evaluate(scenario: dict, client: LLMClient, pacer: Pacer) -> Outcome:
+def evaluate(
+    scenario: dict, client: LLMClient, pacer: Pacer, variant: PromptVariant = WITH_RULES
+) -> Outcome:
     outcome = new_outcome(scenario)
-    prompt = build_prompt(scenario, load_seed_rules(scenario["year_of_assessment"]))
+    prompt = prompt_for(scenario, variant)
 
     start = time.perf_counter()
     for _ in range(2):  # one retry on a malformed reply, as for the interpretation agent
@@ -287,6 +366,7 @@ def write_markdown(
     model: str,
     sha: str,
     run_at: str,
+    variant: PromptVariant = WITH_RULES,
     merged_from: list[str] | None = None,
 ) -> None:
     """The results table. `merged_from` lists the combined runs and adds an "Answer from" column."""
@@ -307,8 +387,9 @@ def write_markdown(
         lines += [f"  - `{run}`" for run in merged_from]
     lines += [
         f"- Model requested: `{model}`; answered by: {', '.join(f'`{v}`' for v in versions)}",
-        f"- Prompt: `{PROMPT_VERSION}` (sha256 `{prompt_sha256()}`), temperature 0, seed 0,"
-        " seed rules given in the prompt",
+        f"- Prompt variant: `{variant.name}`",
+        f"- Prompt: `{variant.version}` (sha256 `{prompt_sha256(variant)}`), temperature 0,"
+        f" seed 0, {variant.description}",
         f"- **Accuracy (verified scenarios answered): {passed}/{len(answered)} = {accuracy}**",
         f"- Unparseable replies (counted wrong): {sum(not o.parsed for o in answered)}",
         f"- API errors, no answer (excluded): {len(verified) - len(answered)}",
@@ -349,18 +430,24 @@ def write_markdown(
     path.write_text("\n".join(lines) + "\n")
 
 
-def prompt_sha256() -> str:
+def prompt_sha256(variant: PromptVariant = WITH_RULES) -> str:
     """Identifies the prompt text, so runs are only combined if it really is the same."""
-    return hashlib.sha256(PROMPT_TEMPLATE.encode()).hexdigest()[:16]
+    return hashlib.sha256(variant.template.encode()).hexdigest()[:16]
 
 
 def write_outputs(
-    stem: Path, outcomes: list[Outcome], model: str, sha: str, run_at: str, **md
+    stem: Path,
+    outcomes: list[Outcome],
+    model: str,
+    sha: str,
+    run_at: str,
+    variant: PromptVariant,
+    **md,
 ) -> Path:
     stem.parent.mkdir(parents=True, exist_ok=True)
     write_csv(stem.with_suffix(".csv"), outcomes)
     write_raw(stem.with_suffix(".raw.jsonl"), outcomes)
-    write_markdown(stem.with_suffix(".md"), outcomes, model, sha, run_at, **md)
+    write_markdown(stem.with_suffix(".md"), outcomes, model, sha, run_at, variant, **md)
     return stem.with_suffix(".md")
 
 
@@ -377,25 +464,27 @@ def run(
     client: LLMClient,
     rpm: float = DEFAULT_RPM,
     skip: Collection[str] = (),
+    variant: PromptVariant = WITH_RULES,
 ) -> tuple[list[Outcome], Path]:
     """Ask the LLM every scenario except `skip`; write the run's results and metadata."""
     scenarios = [s for sid, s in load_scenarios(scenario_dir).items() if sid not in skip]
     pacer = Pacer(rpm)
-    outcomes = [evaluate(s, client, pacer) for s in scenarios]
+    outcomes = [evaluate(s, client, pacer, variant) for s in scenarios]
 
     now = datetime.now(UTC)
     sha = git_sha()
     run_at = now.isoformat(timespec="seconds")
-    stem = out_dir / f"{RUN_PREFIX}{now:%Y%m%dT%H%M%SZ}_{sha}"
+    stem = out_dir / f"{variant.run_prefix}{now:%Y%m%dT%H%M%SZ}_{sha}"
     for o in outcomes:
         o.source_run = stem.name
-    md_path = write_outputs(stem, outcomes, client.model, sha, run_at)
+    md_path = write_outputs(stem, outcomes, client.model, sha, run_at, variant)
     meta = {
         "run_at": run_at,
         "git_sha": sha,
         "model_requested": client.model,
-        "prompt_version": PROMPT_VERSION,
-        "prompt_sha256": prompt_sha256(),
+        "prompt_variant": variant.name,
+        "prompt_version": variant.version,
+        "prompt_sha256": prompt_sha256(variant),
         "scenarios": [o.scenario_id for o in outcomes],
     }
     stem.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -404,8 +493,8 @@ def run(
 
 # --- combining runs ----------------------------------------------------------------------
 
-RUN_PREFIX = "baseline_llm_"  # single runs; merged tables use MERGED_PREFIX, so never re-read
-MERGED_PREFIX = "baseline_merged_"
+# Single runs are read back from <variant.run_prefix>*.csv; merged tables use
+# variant.merged_prefix, so they are never re-read.
 NO_ANSWER = "no answer in any comparable run"
 
 
@@ -416,6 +505,7 @@ class RunInfo:
     model: str
     prompt_version: str
     prompt_sha256: str | None  # None for runs made before it was recorded
+    prompt_variant: str = DEFAULT_VARIANT  # runs made before variants existed were with-rules
 
 
 def read_run_info(csv_path: Path) -> RunInfo | None:
@@ -425,7 +515,12 @@ def read_run_info(csv_path: Path) -> RunInfo | None:
     if meta.exists():
         m = json.loads(meta.read_text())
         return RunInfo(
-            stem.name, m["git_sha"], m["model_requested"], m["prompt_version"], m["prompt_sha256"]
+            stem.name,
+            m["git_sha"],
+            m["model_requested"],
+            m["prompt_version"],
+            m["prompt_sha256"],
+            m.get("prompt_variant", DEFAULT_VARIANT),
         )
     md = stem.with_suffix(".md")
     if not md.exists():
@@ -442,10 +537,15 @@ def read_run_info(csv_path: Path) -> RunInfo | None:
     if not all(found):
         return None
     sha, model, version = (f.group(1) for f in found)
-    return RunInfo(stem.name, sha, model, version, None)
+    variant = re.search(r"^- Prompt variant: `([^`]+)`", text, re.M)
+    return RunInfo(
+        stem.name, sha, model, version, None, variant.group(1) if variant else DEFAULT_VARIANT
+    )
 
 
-def why_not_comparable(info: RunInfo | None, header: list[str], model: str) -> str | None:
+def why_not_comparable(
+    info: RunInfo | None, header: list[str], model: str, variant: PromptVariant = WITH_RULES
+) -> str | None:
     if info is None:
         return "no run metadata"
     if "api_error" not in header:
@@ -454,15 +554,17 @@ def why_not_comparable(info: RunInfo | None, header: list[str], model: str) -> s
         return f"not from a clean commit ({info.git_sha})"
     if info.model != model:
         return f"different model ({info.model})"
-    if info.prompt_version != PROMPT_VERSION:
+    if info.prompt_variant != variant.name:
+        return f"different prompt variant ({info.prompt_variant})"
+    if info.prompt_version != variant.version:
         return f"different prompt version ({info.prompt_version})"
-    if info.prompt_sha256 not in (None, prompt_sha256()):
+    if info.prompt_sha256 not in (None, prompt_sha256(variant)):
         return "different prompt text under the same version"
     return None
 
 
 def earlier_answers(
-    out_dir: Path, model: str, scenarios: dict[str, dict]
+    out_dir: Path, model: str, scenarios: dict[str, dict], variant: PromptVariant = WITH_RULES
 ) -> tuple[dict[str, Outcome], list[str]]:
     """The earliest reply per scenario from comparable earlier runs, rescored against today's
     scenarios, plus why each other run was skipped.
@@ -474,13 +576,13 @@ def earlier_answers(
     """
     answers: dict[str, Outcome] = {}
     skipped: list[str] = []
-    for path in sorted(out_dir.glob(f"{RUN_PREFIX}*.csv")):  # names sort by run time
+    for path in sorted(out_dir.glob(f"{variant.run_prefix}*.csv")):  # names sort by run time
         with path.open(newline="") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             header = list(reader.fieldnames or [])
         info = read_run_info(path)
-        if reason := why_not_comparable(info, header, model):
+        if reason := why_not_comparable(info, header, model, variant):
             skipped.append(f"{path.stem}: {reason}")
             continue
         raw = _read_raw(path.with_suffix(".raw.jsonl"))
@@ -504,10 +606,13 @@ def earlier_answers(
     return answers, skipped
 
 
-def merge(scenario_dir: Path, out_dir: Path, model: str) -> tuple[list[Outcome], Path, list[str]]:
-    """One results table from all comparable runs, each answer labelled with its run."""
+def merge(
+    scenario_dir: Path, out_dir: Path, model: str, variant: PromptVariant = WITH_RULES
+) -> tuple[list[Outcome], Path, list[str]]:
+    """One results table from all comparable runs of `variant`, each answer labelled with its
+    run."""
     scenarios = load_scenarios(scenario_dir)
-    answers, skipped = earlier_answers(out_dir, model, scenarios)
+    answers, skipped = earlier_answers(out_dir, model, scenarios, variant)
     outcomes = []
     for sid, scenario in scenarios.items():
         if sid in answers:
@@ -519,10 +624,9 @@ def merge(scenario_dir: Path, out_dir: Path, model: str) -> tuple[list[Outcome],
     now = datetime.now(UTC)
     sha = git_sha()
     runs = sorted({o.source_run for o in outcomes if o.source_run})
-    stem = out_dir / f"{MERGED_PREFIX}{now:%Y%m%dT%H%M%SZ}_{sha}"
-    md_path = write_outputs(
-        stem, outcomes, model, sha, now.isoformat(timespec="seconds"), merged_from=runs
-    )
+    stem = out_dir / f"{variant.merged_prefix}{now:%Y%m%dT%H%M%SZ}_{sha}"
+    run_at = now.isoformat(timespec="seconds")
+    md_path = write_outputs(stem, outcomes, model, sha, run_at, variant, merged_from=runs)
     return outcomes, md_path, skipped
 
 
@@ -597,12 +701,21 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
     parser.add_argument(
         "--only-missing",
         action="store_true",
-        help="ask only scenarios with no answer in earlier runs of the same model and prompt",
+        help="ask only scenarios with no answer in earlier runs of the same model, prompt"
+        " variant and prompt",
     )
     parser.add_argument(
         "--merge",
         action="store_true",
-        help="combine all comparable runs into one table (no LLM calls unless --only-missing)",
+        help="combine all comparable runs of the same model and prompt variant into one table"
+        " (no LLM calls unless --only-missing)",
+    )
+    parser.add_argument(
+        "--prompt-variant",
+        choices=list(VARIANTS),
+        default=DEFAULT_VARIANT,
+        help="with-rules: the seed rules are in the prompt; no-rules: only the year of"
+        " assessment and the taxpayer's figures, the model applies the Act itself",
     )
     parser.add_argument(
         "--ipv4",
@@ -610,6 +723,7 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
         help="connect to the API over IPv4 only (if IPv6 hangs); or set GEMINI_FORCE_IPV4=1",
     )
     args = parser.parse_args(argv)
+    variant = VARIANTS[args.prompt_variant]
 
     code = 0
     if args.only_missing or not args.merge:
@@ -617,7 +731,7 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
         skip: set[str] = set()
         if args.only_missing:
             scenarios = load_scenarios(args.scenarios)
-            answers, skipped = earlier_answers(args.out, client.model, scenarios)
+            answers, skipped = earlier_answers(args.out, client.model, scenarios, variant)
             for s in skipped:
                 print(f"  skipped earlier run {s}")
             skip = set(answers)
@@ -625,15 +739,15 @@ def main(argv: list[str] | None = None, client: LLMClient | None = None) -> int:
         if args.only_missing and skip >= set(load_scenarios(args.scenarios)):
             print("Nothing missing: no LLM calls made")
         else:
-            outcomes, md_path = run(args.scenarios, args.out, client, args.rpm, skip)
-            code = report(f"LLM baseline ({client.model})", outcomes, md_path)
+            outcomes, md_path = run(args.scenarios, args.out, client, args.rpm, skip, variant)
+            code = report(f"LLM baseline ({client.model}, {variant.name})", outcomes, md_path)
 
     if args.merge:
         model = client.model if client else configured_model()
-        outcomes, md_path, skipped = merge(args.scenarios, args.out, model)
+        outcomes, md_path, skipped = merge(args.scenarios, args.out, model, variant)
         for s in skipped:
             print(f"  skipped run {s}")
-        code = report(f"Merged LLM baseline ({model})", outcomes, md_path)
+        code = report(f"Merged LLM baseline ({model}, {variant.name})", outcomes, md_path)
     return code
 
 

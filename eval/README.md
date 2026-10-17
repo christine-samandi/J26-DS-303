@@ -39,8 +39,8 @@ cp .env.example .env        # then set GEMINI_API_KEY
 python eval/run_baseline_llm.py
 ```
 
-The LLM gets the same seed rules as the engine, inside the prompt, and must return the four
-totals as JSON. It is scored exactly like the engine, to the cent. Temperature 0, seed 0, one
+By default the LLM gets the same seed rules as the engine, inside the prompt, and must return
+the four totals as JSON (see [Prompt variants](#prompt-variants) for the no-rules run). It is scored exactly like the engine, to the cent. Temperature 0, seed 0, one
 retry on a malformed reply. The results record the model that was requested, the model
 version that actually answered, and the prompt version. Raw replies are saved to
 `results/baseline_llm_*.raw.jsonl`.
@@ -58,6 +58,28 @@ and its numbers shouldn't be reported. A full run takes about 2–3 minutes on t
 If calls hang until they time out, IPv6 to Google may be broken on your network: add
 `--ipv4`, or set `GEMINI_FORCE_IPV4=1` in `.env`, to connect over IPv4 only.
 
+#### Prompt variants
+
+```bash
+python eval/run_baseline_llm.py --prompt-variant no-rules
+```
+
+| Variant | The LLM gets | Prompt version | Results files |
+|---|---|---|---|
+| `with-rules` (default) | the seed rules (relief, bands, rates) + the scenario input | `baseline-v1` | `baseline_llm_*`, `baseline_merged_*` |
+| `no-rules` | only the year of assessment, employment income and APIT paid | `baseline-no-rules-v1` | `baseline_norules_llm_*`, `baseline_norules_merged_*` |
+
+`no-rules` asks the LLM to apply the Inland Revenue Act No. 24 of 2017, as amended for that
+YA, from its own knowledge. The prompt gives no rate, band, relief amount or section number
+(a test checks this for every scenario). It still defines the four output fields, so a wrong
+answer means wrong tax law, not a misread field. With-rules measures the LLM's arithmetic;
+no-rules measures its arithmetic plus its knowledge of the law.
+
+The variant is recorded in the file name, in `.meta.json` (`prompt_variant`) and in the
+markdown header. `--prompt-variant` works with every other flag (`--only-missing`, `--merge`,
+`--ipv4`, `--rpm`), and only runs of the same variant are reused or merged. Runs made before
+variants existed count as `with-rules`.
+
 #### Resuming an incomplete run
 
 ```bash
@@ -66,14 +88,16 @@ python eval/run_baseline_llm.py --merge                  # combine runs, no LLM 
 ```
 
 `--only-missing` asks only the scenarios that got no answer (an API error) in every earlier
-run. `--merge` writes `results/baseline_merged_*.{md,csv,raw.jsonl}`: one table with the
-earliest answer per scenario and the run it came from (`source_run`, "Answer from"). Answers
-are re-scored against the current scenarios.
+run. `--merge` writes `results/baseline_merged_*.{md,csv,raw.jsonl}`
+(`baseline_norules_merged_*` for `no-rules`): one table with the earliest answer per scenario
+and the run it came from (`source_run`, "Answer from"). Answers are re-scored against the
+current scenarios.
 
 Only comparable runs are reused, and the script prints why any other run was skipped:
 
-- same model requested and same prompt version, and the same prompt text (each run saves a
-  `.meta.json` with a hash of the prompt; older runs are read from their markdown header);
+- same model requested, same prompt variant and prompt version, and the same prompt text
+  (each run saves a `.meta.json` with a hash of the prompt; older runs are read from their
+  markdown header);
 - from a clean commit (no `-dirty` SHA);
 - scored with API errors kept apart from wrong answers (runs before `44c5136` are not);
 - the scenario's expected totals unchanged since (a corrected hand calculation is asked again).

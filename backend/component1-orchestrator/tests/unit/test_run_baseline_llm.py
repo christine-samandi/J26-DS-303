@@ -2,6 +2,7 @@
 
 import csv
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -54,6 +55,31 @@ def test_prompt_gives_rules_and_input_but_not_the_answer():
     assert "Rs. 1800000" in prompt and "Rs. 3000000" in prompt and "Rs. 50000" in prompt
     assert "from 2500000 and above: 36%" in prompt
     assert "96000" not in prompt and "46000" not in prompt
+
+
+def test_with_rules_variant_is_the_unchanged_original_prompt():
+    variant = baseline.VARIANTS[baseline.DEFAULT_VARIANT]
+    assert variant.name == "with-rules"
+    assert variant.version == "baseline-v1"
+    assert variant.template is baseline.PROMPT_TEMPLATE
+    assert baseline.VARIANTS["no-rules"].run_prefix != variant.run_prefix
+
+
+@pytest.mark.parametrize("path", sorted((EVAL_DIR / "scenarios").glob("GS-*.json")))
+def test_no_rules_prompt_leaks_no_rule(path):
+    scenario = baseline.load_scenario(path)
+    prompt = baseline.build_no_rules_prompt(scenario)
+    # Every number is the act's name, the year of assessment, the taxpayer's own input or
+    # the "or 0" of the output field definitions.
+    allowed = {"0", "24", "2017", *re.findall(r"\d+", scenario["year_of_assessment"])}
+    allowed |= {str(scenario["input"][k]) for k in ("employment_income", "apit_paid")}
+    assert set(re.findall(r"\d+(?:\.\d+)?", prompt)) <= allowed
+    assert f"Rs. {scenario['input']['employment_income']}" in prompt
+    assert f"Rs. {scenario['input']['apit_paid']}" in prompt
+    assert "%" not in prompt
+    assert not re.search(r"\bsection\b|\bs\.\s*\d|\bband|\brelief|\brate", prompt, re.I)
+    for k in baseline.TOTALS:
+        assert f'"{k}"' in prompt  # same output format as with rules
 
 
 def test_correct_answer_passes(one_scenario, tmp_path):
@@ -209,8 +235,8 @@ def rows(path: Path) -> dict[str, dict]:
     return {r["scenario_id"]: r for r in csv.DictReader(path.open())}
 
 
-def merged(out: Path) -> tuple[dict[str, dict], str]:
-    (csv_path,) = out.glob("baseline_merged_*.csv")
+def merged(out: Path, prefix: str = "baseline_merged_") -> tuple[dict[str, dict], str]:
+    (csv_path,) = out.glob(f"{prefix}*.csv")
     return rows(csv_path), csv_path.with_suffix(".md").read_text()
 
 
@@ -334,6 +360,114 @@ def test_answers_to_a_since_corrected_scenario_are_not_reused(two_scenarios, tmp
     retry = FakeClient(answer_for(GS001))
     cli(two_scenarios, out, retry, "--only-missing")
     assert len(retry.prompts) == 1 and "Rs. 3000000" in retry.prompts[0]
+
+
+# --- --prompt-variant ----------------------------------------------------------------------
+
+NO_RULES = ("--prompt-variant", "no-rules")
+
+
+def meta_of(out: Path, prefix: str) -> dict:
+    (path,) = out.glob(f"{prefix}*.meta.json")
+    return json.loads(path.read_text())
+
+
+def test_default_variant_is_with_rules(two_scenarios, tmp_path):
+    out = tmp_path / "out"
+    client = FakeClient(answer_for(GS001), answer_for(GS007))
+    assert cli(two_scenarios, out, client) == 0
+    assert all("Personal relief: Rs. 1800000" in p for p in client.prompts)
+    meta = meta_of(out, "baseline_llm_")
+    assert meta["prompt_variant"] == "with-rules" and meta["prompt_version"] == "baseline-v1"
+    md = next(out.glob("baseline_llm_*.md")).read_text()
+    assert "- Prompt variant: `with-rules`" in md and "seed rules given in the prompt" in md
+    assert not list(out.glob("baseline_norules_*"))
+
+
+def test_no_rules_run_is_scored_against_the_golden_scenarios(two_scenarios, tmp_path):
+    out = tmp_path / "out"
+    client = FakeClient(answer_for(GS001, total_tax=1), answer_for(GS007))
+    assert cli(two_scenarios, out, client, *NO_RULES) == 0
+    assert client.prompts == [
+        baseline.build_no_rules_prompt(baseline.load_scenario(s)) for s in (GS001, GS007)
+    ]
+    table = rows(next(out.glob("baseline_norules_llm_*.csv")))
+    assert table["GS-001"]["passed"] == "False" and table["GS-007"]["passed"] == "True"
+    assert "total_tax: expected 96000.00, got 1" in table["GS-001"]["mismatches"]
+    meta = meta_of(out, "baseline_norules_llm_")
+    assert meta["prompt_variant"] == "no-rules"
+    assert meta["prompt_version"] == "baseline-no-rules-v1"
+    assert meta["prompt_sha256"] == baseline.prompt_sha256(baseline.VARIANTS["no-rules"])
+    md = next(out.glob("baseline_norules_llm_*.md")).read_text()
+    assert "- Prompt variant: `no-rules`" in md and "1/2 = 50.0%" in md
+    assert not list(out.glob("baseline_llm_*"))
+
+
+@pytest.mark.parametrize("first,second", [((), NO_RULES), (NO_RULES, ())])
+def test_only_missing_never_reuses_answers_from_the_other_variant(
+    two_scenarios, tmp_path, first, second
+):
+    out = tmp_path / "out"
+    cli(two_scenarios, out, FakeClient(answer_for(GS001), answer_for(GS007)), *first)
+    retry = FakeClient(answer_for(GS001), answer_for(GS007))
+    assert cli(two_scenarios, out, retry, *second, "--only-missing") == 0
+    assert len(retry.prompts) == 2  # the other variant's answers don't count
+
+
+def test_merge_never_mixes_variants(two_scenarios, tmp_path):
+    out = tmp_path / "out"
+    cli(two_scenarios, out, FakeClient(answer_for(GS001), answer_for(GS007)))
+    # no-rules: GS-001 never answered, GS-007 wrong
+    cli(
+        two_scenarios, out, Flaky([TimeoutError("down")], answer_for(GS007, total_tax=1)), *NO_RULES
+    )
+
+    assert cli(two_scenarios, out, None, "--merge") == 0
+    table, md = merged(out)
+    assert {r["source_run"][: len("baseline_llm_")] for r in table.values()} == {"baseline_llm_"}
+    assert "2/2 = 100.0%" in md and "- Prompt variant: `with-rules`" in md
+    assert "norules" not in md
+
+    assert cli(two_scenarios, out, None, "--merge", *NO_RULES) == 1  # GS-001 still missing
+    table, md = merged(out, "baseline_norules_merged_")
+    assert table["GS-007"]["source_run"].startswith("baseline_norules_llm_")
+    assert table["GS-007"]["passed"] == "False"
+    assert table["GS-001"]["api_error"] == baseline.NO_ANSWER  # not filled from with-rules
+    assert "0/1 = 0.0%" in md and "- Prompt variant: `no-rules`" in md
+    assert "`baseline_llm_" not in md
+
+
+def test_a_run_of_the_other_variant_under_this_prefix_is_skipped(two_scenarios, tmp_path, capsys):
+    out = tmp_path / "out"
+    cli(two_scenarios, out, FakeClient(answer_for(GS001), answer_for(GS007)), *NO_RULES)
+    for path in out.glob("baseline_norules_llm_*"):  # mislabelled: no-rules files, wrong name
+        path.rename(path.with_name(path.name.replace("baseline_norules_llm_", "baseline_llm_")))
+    retry = FakeClient(answer_for(GS001), answer_for(GS007))
+    assert cli(two_scenarios, out, retry, "--only-missing") == 0
+    assert len(retry.prompts) == 2
+    assert "different prompt variant (no-rules)" in capsys.readouterr().out
+
+
+def test_runs_from_before_variants_count_as_with_rules(two_scenarios, tmp_path):
+    out = tmp_path / "out"
+    meta = _first_run(two_scenarios, out).with_suffix(".meta.json")
+    old = {k: v for k, v in json.loads(meta.read_text()).items() if k != "prompt_variant"}
+    meta.write_text(json.dumps(old))
+    idle = FakeClient()
+    assert cli(two_scenarios, out, idle, "--only-missing") == 0
+    assert idle.prompts == []
+    retry = FakeClient(answer_for(GS001), answer_for(GS007))
+    assert cli(two_scenarios, out, retry, *NO_RULES, "--only-missing") == 0
+    assert len(retry.prompts) == 2  # but never as no-rules
+
+
+def test_no_rules_markdown_header_is_read_back_without_meta(two_scenarios, tmp_path):
+    out = tmp_path / "out"
+    cli(two_scenarios, out, FakeClient(answer_for(GS001), answer_for(GS007)), *NO_RULES)
+    next(out.glob("baseline_norules_llm_*.meta.json")).unlink()
+    idle = FakeClient()
+    assert cli(two_scenarios, out, idle, *NO_RULES, "--only-missing") == 0
+    assert idle.prompts == []
 
 
 # --- IPv4 option -------------------------------------------------------------------------------
