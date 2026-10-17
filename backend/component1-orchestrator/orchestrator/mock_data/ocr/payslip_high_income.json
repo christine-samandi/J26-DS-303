@@ -1,0 +1,8 @@
+{
+  "document_id": "doc-payslip-high-income",
+  "document_type": "payslip_annual_summary",
+  "fields": [
+    {"name": "employment_income", "value": "6000000", "confidence": "0.97"},
+    {"name": "apit_paid", "value": "1000000", "confidence": "0.95"}
+  ]
+}

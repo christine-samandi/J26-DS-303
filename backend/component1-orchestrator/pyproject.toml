@@ -29,6 +29,11 @@ llm = [
     "google-genai>=2.30",
     "python-dotenv>=1.0",
 ]
+# Streamlit demo UI (app.py) only.
+demo = [
+    "streamlit>=1.40",
+    "pandas>=2.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["tax_calculation_agent*", "orchestrator*", "explanation_agent*"]
