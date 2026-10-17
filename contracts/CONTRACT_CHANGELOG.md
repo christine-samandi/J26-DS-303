@@ -39,4 +39,6 @@ Any schema change must be reviewed by all components that depend on it.
   - **Money is exact.** It is `Decimal` in Python and a plain JSON number on the wire, with at most 2 decimals. Whole amounts stay whole (96000). Open question: would C4 rather have strings?
   - **Confidence is broken down.** `confidence` keeps every term of C1's v1 formula, and `llm_calls` records each model id, prompt version, temperature and redacted output.
   - **No personal data.** The trace carries amounts, rule ids and generated text only.
+  - **Why the template was shown.** `explanation.rewrite_status` (required) is `not_requested`, `failed`, `rejected` or `accepted`. `failed` means the LLM call itself raised (e.g. quota), so the skeleton text was shown but nothing was rejected; `rejected` means the rewrite failed C1's post-check (`used_fallback` true). The flags must agree with it. C4 can use it for an LLM failure rate in drift monitoring.
+- **Amended (2026-10-17, still v0.1.0, no version bump while a proposal):** added `explanation.rewrite_status`, the matching schema, and `"rewrite_status": "not_requested"` in the three examples.
 - **Review needed from:** De Zoysa K R D P (C4, consumer). For awareness: Elvitigala C S (C3, rule ids and citations) and Senevirathne R S N N (C2, `inputs[].source` and `document_id`).

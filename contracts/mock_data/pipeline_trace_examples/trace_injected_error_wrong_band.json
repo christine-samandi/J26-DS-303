@@ -207,7 +207,8 @@
   "explanation": {
     "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [MOCK], s.TBC (personal relief)]\nTaxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [MOCK], s.TBC (personal relief)]\nTax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [MOCK], First Schedule para. TBC (rates for individuals)]\nTax at 12% on taxable income from 1000000 to 1500000: Rs. 24,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [MOCK], First Schedule para. TBC (rates for individuals)]\nTotal income tax: sum of the tax in each band: Rs. 84,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [MOCK], First Schedule para. TBC (rates for individuals)]\nAPIT already deducted by the employer, credited against the tax: Rs. 50,000.00\nTax still payable: total tax less APIT credit: Rs. 34,000.00",
     "used_fallback": false,
-    "hallucination_flag": false
+    "hallucination_flag": false,
+    "rewrite_status": "not_requested"
   },
   "llm_calls": [],
   "confidence": {

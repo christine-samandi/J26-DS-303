@@ -57,6 +57,7 @@ InputName = Literal["employment_income", "apit_paid"]  # v1 scope; grows with in
 InputSource = Literal["user", "ocr"]
 StepSource = Literal["engine", "ocr", "llm_interpretation"]
 LlmStage = Literal["interpret", "explain"]
+RewriteStatus = Literal["not_requested", "failed", "rejected", "accepted"]
 RerunStage = Literal["retrieve", "calculate", "explain"]
 
 # ---------------------------------------------------------------------------
@@ -170,6 +171,19 @@ class Explanation(ContractModel):
     hallucination_flag: bool = Field(
         description="True if the LLM rewrite added or changed a number or citation."
     )
+    rewrite_status: RewriteStatus = Field(
+        description="What happened to the LLM rewrite: not_requested (no LLM configured), "
+        "failed (the LLM call raised; skeleton text shown, nothing rejected), rejected "
+        "(failed C1's post-check; used_fallback is true), accepted (passed; rewrite shown)."
+    )
+
+    @model_validator(mode="after")
+    def _flags_match_status(self) -> Explanation:
+        if self.used_fallback != (self.rewrite_status == "rejected"):
+            raise ValueError("used_fallback must be true exactly when rewrite_status is 'rejected'")
+        if self.hallucination_flag and self.rewrite_status != "rejected":
+            raise ValueError("hallucination_flag needs rewrite_status 'rejected'")
+        return self
 
 
 class LlmCall(ContractModel):

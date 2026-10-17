@@ -73,8 +73,48 @@ def broken(**changes):
         ({"result.total_tax": 96000.123}, "decimal places"),
         ({"request_id": "0001"}, "String should match pattern"),
         ({"inputs.0.employee_name": "A. Perera"}, "Extra inputs are not permitted"),
+        ({"explanation.rewrite_status": DELETE}, "rewrite_status\n  Field required"),
+        ({"explanation.rewrite_status": "skipped"}, "Input should be 'not_requested'"),
+        ({"explanation.rewrite_status": "rejected"}, "used_fallback must be true exactly"),
+        (
+            {"explanation.used_fallback": True, "explanation.rewrite_status": "failed"},
+            "used_fallback must be true exactly",
+        ),
+        (
+            {"explanation.hallucination_flag": True, "explanation.rewrite_status": "accepted"},
+            "hallucination_flag needs rewrite_status 'rejected'",
+        ),
     ],
 )
 def test_extra_checks(changes, message):
     with pytest.raises(ValidationError, match=message):
         PipelineTrace.model_validate(broken(**changes))
+
+
+@pytest.mark.parametrize("path", MOCKS, ids=lambda p: p.name)
+def test_mocks_carry_rewrite_status(path):
+    explanation = json.loads(path.read_text(encoding="utf-8"))["explanation"]
+    assert explanation["rewrite_status"] == "not_requested"  # no mock has an explain LLM call
+
+
+@pytest.mark.parametrize(
+    ("status", "used_fallback", "hallucination_flag"),
+    [
+        ("not_requested", False, False),
+        ("failed", False, False),  # the LLM call raised: template shown, nothing rejected
+        ("rejected", True, False),  # malformed rewrite
+        ("rejected", True, True),  # rewrite changed a number or citation
+        ("accepted", False, False),
+    ],
+)
+def test_every_rewrite_status_is_accepted_with_consistent_flags(
+    status, used_fallback, hallucination_flag
+):
+    data = broken(
+        **{
+            "explanation.rewrite_status": status,
+            "explanation.used_fallback": used_fallback,
+            "explanation.hallucination_flag": hallucination_flag,
+        }
+    )
+    assert PipelineTrace.model_validate(data).explanation.rewrite_status == status

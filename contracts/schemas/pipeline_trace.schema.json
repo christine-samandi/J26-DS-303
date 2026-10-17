@@ -190,12 +190,24 @@
           "description": "True if the LLM rewrite added or changed a number or citation.",
           "title": "Hallucination Flag",
           "type": "boolean"
+        },
+        "rewrite_status": {
+          "description": "What happened to the LLM rewrite: not_requested (no LLM configured), failed (the LLM call raised; skeleton text shown, nothing rejected), rejected (failed C1's post-check; used_fallback is true), accepted (passed; rewrite shown).",
+          "enum": [
+            "not_requested",
+            "failed",
+            "rejected",
+            "accepted"
+          ],
+          "title": "Rewrite Status",
+          "type": "string"
         }
       },
       "required": [
         "text",
         "used_fallback",
-        "hallucination_flag"
+        "hallucination_flag",
+        "rewrite_status"
       ],
       "title": "Explanation",
       "type": "object"
