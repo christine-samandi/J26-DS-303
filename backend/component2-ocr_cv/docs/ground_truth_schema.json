@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Component 2 ground truth (one file per document)",
+  "description": "The correct answer for one document, typed by a person. Field names match contracts/schemas/ocr_output_schema.json so predictions can be compared directly. Use null when the document does not contain the field.",
+  "type": "object",
+  "required": ["doc_id", "document_type", "source", "languages", "fields", "checked"],
+  "additionalProperties": false,
+  "properties": {
+    "doc_id": { "type": "string", "pattern": "^(PS|BS|IN|RC)_[0-9]{3}$" },
+    "document_type": { "enum": ["payslip", "bank_statement", "invoice", "receipt"] },
+    "source": { "enum": ["real", "synthetic", "web_template"] },
+    "languages": { "type": "array", "items": { "enum": ["si", "ta", "en"] }, "minItems": 1, "uniqueItems": true },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issuer":           { "type": ["string", "null"] },
+        "pay_period":       { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}$" },
+        "document_date":    { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "gross_income":     { "type": ["number", "null"], "minimum": 0 },
+        "epf_employee":     { "type": ["number", "null"], "minimum": 0 },
+        "epf_employer":     { "type": ["number", "null"], "minimum": 0 },
+        "etf":              { "type": ["number", "null"], "minimum": 0 },
+        "apit":             { "type": ["number", "null"], "minimum": 0 },
+        "vat":              { "type": ["number", "null"], "minimum": 0 },
+        "sscl":             { "type": ["number", "null"], "minimum": 0 },
+        "total_deductions": { "type": ["number", "null"], "minimum": 0 },
+        "net_amount":       { "type": ["number", "null"] },
+        "total_amount":     { "type": ["number", "null"] }
+      }
+    },
+    "full_text": { "type": "string", "description": "Optional: every printed line, in reading order, for CER/WER. Leave empty if not typed yet." },
+    "checked": { "type": "boolean", "description": "true once a person has re-checked every value against the paper document" },
+    "notes": { "type": "string" }
+  }
+}
