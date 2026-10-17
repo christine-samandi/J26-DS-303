@@ -1,0 +1,5 @@
+version,amount_lkr,valid_from,valid_to,source_document_id,source_provision,verified,note
+V1,500000,2018-04-01,2019-12-31,DOC-IRA-2017,Fifth Schedule para 2(a),yes,IRD Guide to the Inland Revenue Act s.3.4.2(a)
+V2,3000000,2020-01-01,2022-12-31,DOC-IRA-AMEND-10-2021,s.55(2)(a) amending Fifth Schedule para 2(a),yes,Act certified 2021-05-13 but operative from 2020-01-01 (retrospective)
+V3,1200000,2023-01-01,2025-03-31,DOC-IRA-AMEND-45-2022,s.36(2)(a) amending Fifth Schedule para 2(a),yes,YoA 2022/23 split: Rs. 2250000 for first 9 months + Rs. 300000 for last 3 months; Rs. 1200000 per YoA from 2023-04-01
+V4,1800000,2025-04-01,,DOC-IRA-AMEND-02-2025,s.5 inserting item (v) in Fifth Schedule para 2(a),yes,In force as of 2026-10-11 (Act No. 11 of 2026 checked: no change)

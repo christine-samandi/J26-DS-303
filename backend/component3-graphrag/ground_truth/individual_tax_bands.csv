@@ -1,0 +1,21 @@
+version,valid_from,valid_to,band_order,lower_lkr,upper_lkr,rate_percent,source_document_id,source_provision,verified
+B1,2018-04-01,2019-12-31,1,0,600000,4,DOC-IRA-2017,First Schedule para 1(1),yes
+B1,2018-04-01,2019-12-31,2,600000,1200000,8,DOC-IRA-2017,First Schedule para 1(1),yes
+B1,2018-04-01,2019-12-31,3,1200000,1800000,12,DOC-IRA-2017,First Schedule para 1(1),yes
+B1,2018-04-01,2019-12-31,4,1800000,2400000,16,DOC-IRA-2017,First Schedule para 1(1),yes
+B1,2018-04-01,2019-12-31,5,2400000,3000000,20,DOC-IRA-2017,First Schedule para 1(1),yes
+B1,2018-04-01,2019-12-31,6,3000000,,24,DOC-IRA-2017,First Schedule para 1(1),yes
+B2,2020-01-01,2022-12-31,1,0,3000000,6,DOC-IRA-AMEND-10-2021,s.51(1) inserting First Schedule para 1(1A),yes
+B2,2020-01-01,2022-12-31,2,3000000,6000000,12,DOC-IRA-AMEND-10-2021,s.51(1) inserting First Schedule para 1(1A),yes
+B2,2020-01-01,2022-12-31,3,6000000,,18,DOC-IRA-AMEND-10-2021,s.51(1) inserting First Schedule para 1(1A),yes
+B3,2023-01-01,2025-03-31,1,0,500000,6,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B3,2023-01-01,2025-03-31,2,500000,1000000,12,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B3,2023-01-01,2025-03-31,3,1000000,1500000,18,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B3,2023-01-01,2025-03-31,4,1500000,2000000,24,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B3,2023-01-01,2025-03-31,5,2000000,2500000,30,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B3,2023-01-01,2025-03-31,6,2500000,,36,DOC-IRA-AMEND-45-2022,s.33(1) inserting First Schedule para 1(1B)(b) and 1(1C),yes
+B4,2025-04-01,,1,0,1000000,6,DOC-IRA-AMEND-02-2025,s.3(1)(b) inserting First Schedule para 1(1D),yes
+B4,2025-04-01,,2,1000000,1500000,18,DOC-IRA-AMEND-02-2025,s.3(1)(b) inserting First Schedule para 1(1D),yes
+B4,2025-04-01,,3,1500000,2000000,24,DOC-IRA-AMEND-02-2025,s.3(1)(b) inserting First Schedule para 1(1D),yes
+B4,2025-04-01,,4,2000000,2500000,30,DOC-IRA-AMEND-02-2025,s.3(1)(b) inserting First Schedule para 1(1D),yes
+B4,2025-04-01,,5,2500000,,36,DOC-IRA-AMEND-02-2025,s.3(1)(b) inserting First Schedule para 1(1D),yes
