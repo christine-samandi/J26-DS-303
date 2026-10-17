@@ -3,4 +3,5 @@
 data/processed/
 data/extracted/
 data/evaluation/
+data/graph/
 *.log
