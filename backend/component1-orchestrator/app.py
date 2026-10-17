@@ -12,6 +12,7 @@ import streamlit as st
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+from explanation_agent.badge import explanation_badge  # noqa: E402
 from explanation_agent.demo_tamper import TamperedRewriteLLM, Tampering  # noqa: E402
 from orchestrator.clients import (  # noqa: E402
     MockAssuranceClient,
@@ -177,13 +178,8 @@ if calc:
 exp = result.explanation
 if exp:
     st.subheader("Explanation")
-    rewriter = "rewrite" if demo_tamper else "Gemini rewrite"
-    if exp.hallucination_flag or exp.used_fallback:
-        st.badge(f"Template · {rewriter} rejected by post-check", color="red")
-    elif llm:
-        st.badge(f"{rewriter} · verified by post-check", color="green")
-    else:
-        st.badge("Template (deterministic)", color="blue")
+    label, color = explanation_badge(exp, "rewrite" if demo_tamper else "Gemini rewrite")
+    st.badge(label, color=color)
     if demo_tamper:
         st.caption("Simulated tampered LLM output (demo mode)")
     for line in exp.lines:

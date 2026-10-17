@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from explanation_agent.models import Claim, Explanation, LlmCall
+from explanation_agent.models import Claim, Explanation, LlmCall, RewriteStatus
 from explanation_agent.post_check import TAG, check
 from tax_calculation_agent.engine import CalcStep
 
@@ -84,6 +84,8 @@ def explain(
     Without an LLM the template is the explanation. With one, its rewrite is used only if it
     passes the post-check. An LLM error falls back to the template without a confidence
     penalty (nothing wrong was produced); a rejected rewrite sets `used_fallback`.
+    `rewrite_status` records which of these happened: not_requested, failed, rejected or
+    accepted.
     """
     template = template_lines(steps, rules_used)
     if llm is None:
@@ -93,7 +95,7 @@ def explain(
         reply, model_version = llm.generate(build_prompt(steps, template))
     except Exception as exc:  # no answer at all; the type name carries no PII
         return ExplainOutcome(
-            _explanation(steps, template, rules_used),
+            _explanation(steps, template, rules_used, "failed"),
             None,
             (f"explanation LLM call failed ({type(exc).__name__}); template text shown",),
         )
@@ -107,13 +109,9 @@ def explain(
     )
     result = check(reply, steps, template, rules_used)
     if result.passed:
-        return ExplainOutcome(_explanation(steps, result.lines, rules_used), call)
+        return ExplainOutcome(_explanation(steps, result.lines, rules_used, "accepted"), call)
     explanation = _explanation(
-        steps,
-        template,
-        rules_used,
-        used_fallback=True,
-        hallucination_flag=bool(result.hallucinations),
+        steps, template, rules_used, "rejected", hallucination_flag=bool(result.hallucinations)
     )
     warnings = tuple(f"explanation rewrite rejected: {f}" for f in result.failures)
     return ExplainOutcome(explanation, call, warnings)
@@ -123,11 +121,18 @@ def _explanation(
     steps: Sequence[CalcStep],
     lines: Sequence[str],
     rules_used: Mapping[str, str],
-    **flags: bool,
+    rewrite_status: RewriteStatus = "not_requested",
+    hallucination_flag: bool = False,
 ) -> Explanation:
     shown = [TAG.sub(lambda m: f"[{rules_used[m.group(1)]}]", line) for line in lines]
     claims = tuple(
         Claim(claim_id=f"CL{i}", step_id=s.step_id, text=text, citation_refs=s.citation_refs)
         for i, (s, text) in enumerate(zip(steps, shown, strict=True), start=1)
     )
-    return Explanation(lines=tuple(shown), claims=claims, **flags)
+    return Explanation(
+        lines=tuple(shown),
+        claims=claims,
+        used_fallback=rewrite_status == "rejected",
+        hallucination_flag=hallucination_flag,
+        rewrite_status=rewrite_status,
+    )
