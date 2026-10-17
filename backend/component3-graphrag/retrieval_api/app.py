@@ -59,3 +59,13 @@ def retrieve(request: RetrievalRequest) -> RetrievalOutput:
 
     validate_output(to_contract_json(response))  # double-check against the shared JSON Schema
     return response
+
+
+@app.post("/reload")
+def reload_graph() -> dict[str, str | int]:
+    """Forget the cached graph so the next request reads it again (after an update)."""
+    graph_backend.graph.cache_clear()
+    if get_settings().mode != "graphrag":
+        return {"status": "ok", "mode": get_settings().mode}
+    data = graph_backend.graph()
+    return {"status": "reloaded", "rule_versions": len(data.versions), "chunks": len(data.chunks)}
