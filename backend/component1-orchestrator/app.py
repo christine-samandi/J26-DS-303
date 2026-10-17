@@ -1,4 +1,5 @@
 """C1 PP1 demo: input -> orchestrator -> cited, verified answer."""
+
 import os
 import random
 import sys
@@ -11,7 +12,11 @@ import streamlit as st
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from orchestrator.clients import MockAssuranceClient, MockOcrClient, MockRetrievalClient  # noqa: E402
+from orchestrator.clients import (  # noqa: E402
+    MockAssuranceClient,
+    MockOcrClient,
+    MockRetrievalClient,
+)
 from orchestrator.graph import run  # noqa: E402
 from orchestrator.llm import explainer_llm_from_env  # noqa: E402
 from orchestrator.models import TaxRequest  # noqa: E402
@@ -20,6 +25,8 @@ from orchestrator.stages import Deps  # noqa: E402
 PAYSLIPS = {
     "Clean payslip": "payslip_clean",
     "Noisy payslip (low OCR confidence)": "payslip_noisy_low_confidence",
+    "Refund case": "payslip_refund",
+    "High income (all 5 bands)": "payslip_high_income",
 }
 STATUS_BOX = {"delivered": st.success, "needs_review": st.warning, "failed": st.error}
 
@@ -128,14 +135,19 @@ if calc:
 
     st.subheader("Calculation steps")
     st.dataframe(
-        pd.DataFrame([{
-            "Step": s.step_id,
-            "What": s.description,
-            "Operation": s.operation,
-            "Result (Rs)": f"{s.result:,.2f}",
-            "Citations": ", ".join(s.citation_refs),
-            "Source": str(s.source),
-        } for s in calc.steps]),
+        pd.DataFrame(
+            [
+                {
+                    "Step": s.step_id,
+                    "What": s.description,
+                    "Operation": s.operation,
+                    "Result (Rs)": f"{s.result:,.2f}",
+                    "Citations": ", ".join(s.citation_refs),
+                    "Source": str(s.source),
+                }
+                for s in calc.steps
+            ]
+        ),
         hide_index=True,
         width="stretch",
     )
@@ -157,8 +169,9 @@ with left:
     if result.confidence:
         st.subheader("Confidence breakdown")
         st.dataframe(
-            pd.DataFrame([{"Term": k, "Value": str(v)}
-                          for k, v in result.confidence.model_dump().items()]),
+            pd.DataFrame(
+                [{"Term": k, "Value": str(v)} for k, v in result.confidence.model_dump().items()]
+            ),
             hide_index=True,
             width="stretch",
         )

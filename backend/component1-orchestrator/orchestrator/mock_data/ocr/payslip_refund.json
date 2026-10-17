@@ -1,0 +1,8 @@
+{
+  "document_id": "doc-payslip-refund",
+  "document_type": "payslip_annual_summary",
+  "fields": [
+    {"name": "employment_income", "value": "2400000", "confidence": "0.96"},
+    {"name": "apit_paid", "value": "60000", "confidence": "0.95"}
+  ]
+}
