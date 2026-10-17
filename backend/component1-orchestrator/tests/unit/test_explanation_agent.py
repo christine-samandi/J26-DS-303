@@ -6,9 +6,11 @@ from decimal import Decimal as D
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 import explanation_agent
 from explanation_agent.explainer import PROMPT_VERSION, explain, template_lines
+from explanation_agent.models import Explanation
 from explanation_agent.post_check import number_words_in, numbers_in
 from tax_calculation_agent.engine import calculate
 from tax_calculation_agent.ruleset import load_seed_rules
@@ -84,6 +86,7 @@ def test_without_llm_the_template_is_the_explanation():
         f"Rs. 1,200,000.00 [{RELIEF.citation}]"
     )
     assert not outcome.explanation.used_fallback
+    assert outcome.explanation.rewrite_status == "not_requested"
     assert_template_shown(outcome)
 
 
@@ -91,6 +94,7 @@ def test_honest_rewrite_is_used_with_citations_rendered():
     outcome, llm = run(reply())
     e = outcome.explanation
     assert not e.used_fallback and not e.hallucination_flag and outcome.warnings == ()
+    assert e.rewrite_status == "accepted"
     assert e.lines[0] == f"Everyone resident gets Rs. 1,800,000 tax-free [{RELIEF.citation}]."
     assert [c.step_id for c in e.claims] == IDS
     assert [c.text for c in e.claims] == list(e.lines)
@@ -213,7 +217,7 @@ CHEATS = {
 def test_cheating_rewrite_falls_back_to_the_template(step_id, text, problem):
     outcome, _ = run(reply(**{step_id: text}))
     e = outcome.explanation
-    assert e.used_fallback and e.hallucination_flag
+    assert e.used_fallback and e.hallucination_flag and e.rewrite_status == "rejected"
     assert_template_shown(outcome)
     assert any(step_id in w and problem in w for w in outcome.warnings), outcome.warnings
     assert outcome.llm_call.output == reply(**{step_id: text})  # the cheat is kept for audit
@@ -233,6 +237,7 @@ def test_cheating_rewrite_falls_back_to_the_template(step_id, text, problem):
 def test_malformed_reply_falls_back_without_hallucination_flag(bad):
     outcome, _ = run(bad)
     assert outcome.explanation.used_fallback and not outcome.explanation.hallucination_flag
+    assert outcome.explanation.rewrite_status == "rejected"
     assert_template_shown(outcome)
     assert len(outcome.warnings) == 1
 
@@ -240,9 +245,51 @@ def test_malformed_reply_falls_back_without_hallucination_flag(bad):
 def test_llm_error_shows_the_template_without_a_penalty():
     outcome, _ = run(TimeoutError("quota exhausted for req-0001"))
     assert outcome.llm_call is None
-    assert not outcome.explanation.used_fallback
+    e = outcome.explanation
+    assert not e.used_fallback and not e.hallucination_flag
+    assert e.rewrite_status == "failed"  # told apart from "no LLM" and from "rejected"
     assert_template_shown(outcome)
     assert outcome.warnings == ("explanation LLM call failed (TimeoutError); template text shown",)
+
+
+class ClientError(Exception):
+    """Stands in for google.genai.errors.ClientError (a 429 quota error)."""
+
+
+def test_gemini_client_error_is_a_failed_rewrite():
+    outcome, llm = run(ClientError("429 RESOURCE_EXHAUSTED"))
+    assert len(llm.prompts) == 1
+    assert outcome.explanation.rewrite_status == "failed"
+    assert outcome.warnings == ("explanation LLM call failed (ClientError); template text shown",)
+
+
+# --- rewrite_status consistency ------------------------------------------------------------
+
+
+def explanation(**fields) -> Explanation:
+    return Explanation(lines=("x",), claims=(), **fields)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"rewrite_status": "rejected"},  # rejected but no fallback
+        {"rewrite_status": "failed", "used_fallback": True},
+        {"rewrite_status": "accepted", "used_fallback": True},
+        {"rewrite_status": "failed", "hallucination_flag": True},
+        {"rewrite_status": "accepted", "hallucination_flag": True},
+    ],
+)
+def test_inconsistent_rewrite_status_is_refused(fields):
+    with pytest.raises(ValidationError):
+        explanation(**fields)
+
+
+def test_data_from_before_rewrite_status_still_loads():
+    old = explanation(used_fallback=True, hallucination_flag=True).model_dump()
+    del old["rewrite_status"]
+    assert Explanation.model_validate(old).rewrite_status == "rejected"
+    assert explanation().rewrite_status == "not_requested"
 
 
 # --- template, determinism, imports ----------------------------------------------------------
