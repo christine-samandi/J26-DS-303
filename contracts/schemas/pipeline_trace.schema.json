@@ -1,0 +1,585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/christine-samandi/J26-DS-303/contracts/schemas/pipeline_trace.schema.json",
+  "$comment": "GENERATED from contracts/j26_contracts by `python -m j26_contracts.export`. Do not edit.",
+  "$defs": {
+    "CalcStep": {
+      "additionalProperties": false,
+      "description": "One step of the deterministic calculation. `result` = `operation` applied to `inputs`.",
+      "properties": {
+        "step_id": {
+          "pattern": "^S[0-9]+_[A-Z0-9_]+$",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "operation": {
+          "description": "Expression over the input names, e.g. 'max(0, employment_income - personal_relief)'. Rounding: round_half_up(x, 0.01).",
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "result": {
+          "description": "LKR, at most 2 decimals",
+          "minimum": 0,
+          "title": "Result",
+          "type": "number"
+        },
+        "citation_refs": {
+          "description": "rule_ids in rules_used. May be empty.",
+          "items": {
+            "pattern": "^RULE-[A-Z0-9_-]+$",
+            "type": "string"
+          },
+          "title": "Citation Refs",
+          "type": "array"
+        },
+        "source": {
+          "enum": [
+            "engine",
+            "ocr",
+            "llm_interpretation"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "step_id",
+        "description",
+        "inputs",
+        "operation",
+        "result",
+        "citation_refs",
+        "source",
+        "confidence"
+      ],
+      "title": "CalcStep",
+      "type": "object"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "description": "One checkable statement in the explanation.",
+      "properties": {
+        "claim_id": {
+          "pattern": "^CL[0-9]+$",
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "step_id": {
+          "pattern": "^S[0-9]+_[A-Z0-9_]+$",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "citation_refs": {
+          "items": {
+            "pattern": "^RULE-[A-Z0-9_-]+$",
+            "type": "string"
+          },
+          "title": "Citation Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim_id",
+        "step_id",
+        "text",
+        "citation_refs"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "ConfidenceTerms": {
+      "additionalProperties": false,
+      "description": "score = min(ocr, retrieval, interpretation, explanation) x conflict_penalty.",
+      "properties": {
+        "method": {
+          "const": "c1-v1",
+          "title": "Method",
+          "type": "string"
+        },
+        "score": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        },
+        "ocr": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Ocr",
+          "type": "number"
+        },
+        "retrieval": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Retrieval",
+          "type": "number"
+        },
+        "interpretation": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Interpretation",
+          "type": "number"
+        },
+        "explanation": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Explanation",
+          "type": "number"
+        },
+        "conflict_penalty": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Conflict Penalty",
+          "type": "number"
+        }
+      },
+      "required": [
+        "method",
+        "score",
+        "ocr",
+        "retrieval",
+        "interpretation",
+        "explanation",
+        "conflict_penalty"
+      ],
+      "title": "ConfidenceTerms",
+      "type": "object"
+    },
+    "Explanation": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "description": "What the user is shown.",
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "used_fallback": {
+          "description": "True if the LLM rewrite failed C1's post-check and the deterministic skeleton text was used instead.",
+          "title": "Used Fallback",
+          "type": "boolean"
+        },
+        "hallucination_flag": {
+          "description": "True if the LLM rewrite added or changed a number or citation.",
+          "title": "Hallucination Flag",
+          "type": "boolean"
+        },
+        "rewrite_status": {
+          "description": "What happened to the LLM rewrite: not_requested (no LLM configured), failed (the LLM call raised; skeleton text shown, nothing rejected), rejected (failed C1's post-check; used_fallback is true), accepted (passed; rewrite shown).",
+          "enum": [
+            "not_requested",
+            "failed",
+            "rejected",
+            "accepted"
+          ],
+          "title": "Rewrite Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "used_fallback",
+        "hallucination_flag",
+        "rewrite_status"
+      ],
+      "title": "Explanation",
+      "type": "object"
+    },
+    "InputValue": {
+      "additionalProperties": false,
+      "description": "One amount the calculation used.",
+      "properties": {
+        "name": {
+          "enum": [
+            "employment_income",
+            "apit_paid"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "amount": {
+          "description": "LKR, at most 2 decimals",
+          "minimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "ocr"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "C2 document the amount was read from (source = ocr).",
+          "title": "Document Id"
+        },
+        "field_confidence": {
+          "description": "C2's confidence; 1 for typed input.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Field Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "amount",
+        "source",
+        "field_confidence"
+      ],
+      "title": "InputValue",
+      "type": "object"
+    },
+    "LlmCall": {
+      "additionalProperties": false,
+      "description": "Every LLM call that shaped this answer. Prompts and outputs are PII-redacted.",
+      "properties": {
+        "stage": {
+          "enum": [
+            "interpret",
+            "explain"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "model": {
+          "description": "Model version that actually answered.",
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_version": {
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "temperature": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "output": {
+          "description": "Raw (redacted) model output.",
+          "title": "Output",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "model",
+        "prompt_version",
+        "temperature",
+        "output"
+      ],
+      "title": "LlmCall",
+      "type": "object"
+    },
+    "Regeneration": {
+      "additionalProperties": false,
+      "description": "Present on attempt 2: what C4 flagged on attempt 1 and where C1 restarted.",
+      "properties": {
+        "previous_attempt": {
+          "const": 1,
+          "title": "Previous Attempt",
+          "type": "integer"
+        },
+        "rerun_from": {
+          "enum": [
+            "retrieve",
+            "calculate",
+            "explain"
+          ],
+          "title": "Rerun From",
+          "type": "string"
+        },
+        "failed_step_ids": {
+          "description": "Step ids from attempt 1's trace.",
+          "items": {
+            "pattern": "^S[0-9]+_[A-Z0-9_]+$",
+            "type": "string"
+          },
+          "title": "Failed Step Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "previous_attempt",
+        "rerun_from",
+        "failed_step_ids"
+      ],
+      "title": "Regeneration",
+      "type": "object"
+    },
+    "RuleUsed": {
+      "additionalProperties": false,
+      "description": "A rule from C3 that a step cites. C4 can re-fetch it with RetrievalRequest.rule_ids.",
+      "properties": {
+        "rule_id": {
+          "pattern": "^RULE-[A-Z0-9_-]+$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rule_key": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule Key"
+        },
+        "citation": {
+          "description": "source.citation as C3 returned it.",
+          "minLength": 1,
+          "title": "Citation",
+          "type": "string"
+        },
+        "retrieval_confidence": {
+          "description": "C3's confidence.score.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Retrieval Confidence",
+          "type": "number"
+        },
+        "seed_agrees": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether C1's seed rules agree with C3's values. null = no seed to compare.",
+          "title": "Seed Agrees"
+        }
+      },
+      "required": [
+        "rule_id",
+        "citation",
+        "retrieval_confidence"
+      ],
+      "title": "RuleUsed",
+      "type": "object"
+    },
+    "TaxResult": {
+      "additionalProperties": false,
+      "properties": {
+        "taxable_income": {
+          "description": "LKR, at most 2 decimals",
+          "minimum": 0,
+          "title": "Taxable Income",
+          "type": "number"
+        },
+        "total_tax": {
+          "description": "LKR, at most 2 decimals",
+          "minimum": 0,
+          "title": "Total Tax",
+          "type": "number"
+        },
+        "tax_payable": {
+          "description": "0 when there is a refund.",
+          "minimum": 0,
+          "title": "Tax Payable",
+          "type": "number"
+        },
+        "refund": {
+          "description": "0 when tax is payable.",
+          "minimum": 0,
+          "title": "Refund",
+          "type": "number"
+        }
+      },
+      "required": [
+        "taxable_income",
+        "total_tax",
+        "tax_payable",
+        "refund"
+      ],
+      "title": "TaxResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Everything C1 computed for one attempt of one request, sent to Component 4 (output assurance) for verification. Owner: C1. PROPOSAL v0.1.0, not yet agreed.",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "description": "Same request_id as every JSON of the request.",
+      "pattern": "^req-[A-Za-z0-9-]+$",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "attempt": {
+      "description": "1, or 2 after one REGENERATE. Never more.",
+      "maximum": 2,
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "year_of_assessment": {
+      "pattern": "^\\d{4}/\\d{2}$",
+      "title": "Year Of Assessment",
+      "type": "string"
+    },
+    "taxpayer_category": {
+      "enum": [
+        "resident_individual",
+        "non_resident_individual",
+        "senior_citizen",
+        "any"
+      ],
+      "title": "Taxpayer Category",
+      "type": "string"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/InputValue"
+      },
+      "minItems": 1,
+      "title": "Inputs",
+      "type": "array"
+    },
+    "rules_used": {
+      "items": {
+        "$ref": "#/$defs/RuleUsed"
+      },
+      "minItems": 1,
+      "title": "Rules Used",
+      "type": "array"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/CalcStep"
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    },
+    "result": {
+      "$ref": "#/$defs/TaxResult"
+    },
+    "claims": {
+      "items": {
+        "$ref": "#/$defs/Claim"
+      },
+      "minItems": 1,
+      "title": "Claims",
+      "type": "array"
+    },
+    "explanation": {
+      "$ref": "#/$defs/Explanation"
+    },
+    "llm_calls": {
+      "description": "Empty when no LLM was used.",
+      "items": {
+        "$ref": "#/$defs/LlmCall"
+      },
+      "title": "Llm Calls",
+      "type": "array"
+    },
+    "confidence": {
+      "$ref": "#/$defs/ConfidenceTerms"
+    },
+    "conflicts": {
+      "description": "Where C1's seed rules and C3 disagree.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Conflicts",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "regeneration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Regeneration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Required on attempt 2, absent on attempt 1."
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "attempt",
+    "generated_at",
+    "year_of_assessment",
+    "taxpayer_category",
+    "inputs",
+    "rules_used",
+    "steps",
+    "result",
+    "claims",
+    "explanation",
+    "llm_calls",
+    "confidence",
+    "conflicts",
+    "warnings"
+  ],
+  "title": "PipelineTrace",
+  "type": "object"
+}

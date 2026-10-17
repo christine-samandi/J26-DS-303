@@ -23,3 +23,22 @@ Any schema change must be reviewed by all components that depend on it.
 - **Reason:** Supervisor recommended Pydantic for validating JSON structure. One definition instead of two, and every component can import the same models to validate what it sends and receives.
 - **Extra checks (Pydantic only):** `in_force_on_as_of_date` must match the rule's dates and the queried date; `valid_to` not before `valid_from`; results ranked 1..n; with `include_history: false` only rules in force are returned.
 - **Review needed from:** Fernando W I C S (C1), De Zoysa K R D P (C4), Senevirathne R S N N (C2, for awareness).
+
+## pipeline_trace — v0.1.0 PROPOSAL
+
+- **Date:** 2026-10-15
+- **Author:** Fernando W I C S (C1)
+- **Status:** Proposal for review. Not agreed yet; becomes 1.0.0 once C4 approves.
+- **Change:** Added `j26_contracts/trace.py` (`PipelineTrace`), the generated `schemas/pipeline_trace.schema.json`, and three examples in `mock_data/pipeline_trace_examples/`: an injected wrong-band error on attempt 1, the corrected attempt 2, and a low-OCR-confidence trace.
+- **Reason:** C4 needs everything C1 computed for one attempt so it can check every figure and citation without calling C1 back. It also unblocks the `req-0001` REGENERATE → PASS mock flow.
+- **Key decisions (for review):**
+  - **One trace per attempt.** `attempt` is 1 or 2. Attempt 2 must carry `regeneration` (the failed step ids and where C1 restarted).
+  - **Every step can be recomputed.** Each step has named `inputs`, an `operation` string and a `result`, so C4 can recompute it.
+  - **Citations stay inside the evidence.** `citation_refs` are C3 `rule_id`s, and every one must appear in `rules_used`. C4 re-fetches rules by id (`RetrievalRequest.rule_ids`).
+  - **Claims cover every step.** `claims[]` links each statement in the explanation to a step and its citations, and every step must have at least one claim.
+  - **Money is exact.** It is `Decimal` in Python and a plain JSON number on the wire, with at most 2 decimals. Whole amounts stay whole (96000). Open question: would C4 rather have strings?
+  - **Confidence is broken down.** `confidence` keeps every term of C1's v1 formula, and `llm_calls` records each model id, prompt version, temperature and redacted output.
+  - **No personal data.** The trace carries amounts, rule ids and generated text only.
+  - **Why the template was shown.** `explanation.rewrite_status` (required) is `not_requested`, `failed`, `rejected` or `accepted`. `failed` means the LLM call itself raised (e.g. quota), so the skeleton text was shown but nothing was rejected; `rejected` means the rewrite failed C1's post-check (`used_fallback` true). The flags must agree with it. C4 can use it for an LLM failure rate in drift monitoring.
+- **Amended (2026-10-17, still v0.1.0, no version bump while a proposal):** added `explanation.rewrite_status`, the matching schema, and `"rewrite_status": "not_requested"` in the three examples.
+- **Review needed from:** De Zoysa K R D P (C4, consumer). For awareness: Elvitigala C S (C3, rule ids and citations) and Senevirathne R S N N (C2, `inputs[].source` and `document_id`).
