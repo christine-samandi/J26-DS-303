@@ -12,6 +12,7 @@ import streamlit as st
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+from explanation_agent.demo_tamper import TamperedRewriteLLM, Tampering  # noqa: E402
 from orchestrator.clients import (  # noqa: E402
     MockAssuranceClient,
     MockOcrClient,
@@ -59,6 +60,20 @@ def rs(x) -> str:
     return f"Rs {x:,.2f}"
 
 
+def tampered_markdown(t: Tampering) -> list[str]:
+    """The rejected rewrite, one line per step, with the changed figure and citation marked."""
+    out = []
+    for sid, text in t.lines:
+        if sid == t.figure_step:
+            text = text.replace(t.new_figure, f":red-background[**{t.new_figure}**]", 1)
+        if sid == t.citation_to and t.citation_to != t.citation_from:
+            text = text.replace(
+                f"[{t.citation}]", f":orange[{t.citation} (moved from {t.citation_from})]"
+            )
+        out.append(f"- `{sid}` {text}")
+    return out
+
+
 # ---------------- UI: input ----------------
 st.set_page_config(page_title="J26-DS-303 Tax Assistant", layout="wide")
 st.title("Explainable Agentic AI Tax Assistant")
@@ -77,6 +92,11 @@ with st.sidebar:
 
     st.header("Options")
     use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
+    demo_tamper = st.toggle(
+        "Demo: simulate tampered rewrite",
+        value=False,
+        help="Offline: feeds a deliberately wrong rewrite to the real post-check. No Gemini call.",
+    )
     force_regen = st.toggle("C4 mock: force one REGENERATE", value=False)
     go = st.button("Calculate", type="primary", width="stretch")
 
@@ -86,7 +106,9 @@ if not go:
 
 # ---------------- run ----------------
 llm = None
-if use_gemini:
+if demo_tamper:  # replaces Gemini entirely: no key, no network
+    llm = TamperedRewriteLLM()
+elif use_gemini:
     env = load_env()
     env["C1_EXPLAINER_LLM"] = "gemini"
     try:
@@ -155,14 +177,26 @@ if calc:
 exp = result.explanation
 if exp:
     st.subheader("Explanation")
+    rewriter = "rewrite" if demo_tamper else "Gemini rewrite"
     if exp.hallucination_flag or exp.used_fallback:
-        st.badge("Template · Gemini rewrite rejected by post-check", color="red")
+        st.badge(f"Template · {rewriter} rejected by post-check", color="red")
     elif llm:
-        st.badge("Gemini rewrite · verified by post-check", color="green")
+        st.badge(f"{rewriter} · verified by post-check", color="green")
     else:
         st.badge("Template (deterministic)", color="blue")
+    if demo_tamper:
+        st.caption("Simulated tampered LLM output (demo mode)")
     for line in exp.lines:
         st.markdown(f"- {line}")
+    if demo_tamper and llm.last:
+        with st.expander("What the AI tried to say", expanded=False):
+            st.caption(
+                f"Rejected: {llm.last.figure_step} changed from Rs. {llm.last.old_figure} "
+                f"to Rs. {llm.last.new_figure}; citation {llm.last.citation} moved from "
+                f"{llm.last.citation_from} to {llm.last.citation_to}."
+            )
+            for line in tampered_markdown(llm.last):
+                st.markdown(line)
 
 left, right = st.columns(2)
 with left:
