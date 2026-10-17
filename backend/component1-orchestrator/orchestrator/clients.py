@@ -6,15 +6,23 @@ The orchestrator only talks to the Protocols, so swapping mock for HTTP is a con
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import urllib.error
+import urllib.request
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
-from j26_contracts.retrieval import RetrievalOutput, RetrievalRequest
+from j26_contracts.retrieval import RetrievalOutput, RetrievalRequest, to_contract_json
+from pydantic import ValidationError
 
 from orchestrator.models import AssuranceVerdict, Decision, OcrResult, PipelineTrace
 
 MOCK_DIR = Path(__file__).resolve().parent / "mock_data"
+C3_DEFAULT_URL = "http://localhost:8003"
+
+
+class ComponentUnavailable(Exception):
+    """Another component could not be reached or sent an invalid answer. The request fails."""
 
 
 class OcrClient(Protocol):  # C2
@@ -52,6 +60,49 @@ class MockRetrievalClient:
         data = json.loads(self.path.read_text(encoding="utf-8"))
         data["request_id"] = request.request_id
         return RetrievalOutput.model_validate(data)
+
+
+class HttpRetrievalClient:
+    """C3's real GraphRAG service: POST <base_url>/retrieve with the frozen retrieval contract.
+
+    Both directions are validated with the shared j26_contracts models. Keeps the last answer
+    (`last`) so the UI can show which law was used. Standard library only (no new dependency).
+    """
+
+    def __init__(self, base_url: str = C3_DEFAULT_URL, timeout_s: float = 30.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_s = timeout_s
+        self.last: RetrievalOutput | None = None
+
+    def retrieve(self, request: RetrievalRequest) -> RetrievalOutput:
+        url = f"{self.base_url}/retrieve"
+        body = json.dumps(to_contract_json(request)).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, method="POST", headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:300]
+            raise ComponentUnavailable(f"C3 at {url} answered HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            raise ComponentUnavailable(f"C3 is not reachable at {url} ({e})") from e
+        try:
+            self.last = RetrievalOutput.model_validate_json(raw)
+        except ValidationError as e:
+            raise ComponentUnavailable(f"C3's answer breaks the retrieval contract: {e}") from e
+        return self.last
+
+
+def retrieval_client_from_env(env: Mapping[str, str]) -> MockRetrievalClient | HttpRetrievalClient:
+    """C1_RETRIEVAL=http -> the real C3 service at C3_API_URL (default localhost:8003).
+
+    Anything else (or unset) -> the mock, so tests and offline demos need no running service.
+    """
+    if env.get("C1_RETRIEVAL", "mock").strip().lower() == "http":
+        return HttpRetrievalClient(env.get("C3_API_URL", C3_DEFAULT_URL))
+    return MockRetrievalClient()
 
 
 class MockAssuranceClient:

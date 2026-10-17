@@ -15,6 +15,8 @@ sys.path.insert(0, str(HERE))
 from explanation_agent.badge import explanation_badge  # noqa: E402
 from explanation_agent.demo_tamper import TamperedRewriteLLM, Tampering  # noqa: E402
 from orchestrator.clients import (  # noqa: E402
+    C3_DEFAULT_URL,
+    HttpRetrievalClient,
     MockAssuranceClient,
     MockOcrClient,
     MockRetrievalClient,
@@ -30,6 +32,8 @@ PAYSLIPS = {
     "Refund case": "payslip_refund",
     "High income (all 5 bands)": "payslip_high_income",
 }
+# YAs the live C3 graph can answer (the mock only has 2025/26)
+LIVE_YEARS = ["2025/26", "2024/25", "2023/24", "2022/23", "2021/22", "2020/21", "2019/20"]
 STATUS_BOX = {"delivered": st.success, "needs_review": st.warning, "failed": st.error}
 
 
@@ -61,6 +65,16 @@ def rs(x) -> str:
     return f"Rs {x:,.2f}"
 
 
+def law_value(rule) -> str:
+    """A C3 rule's structured value: an amount, or its band rates."""
+    v = rule.values
+    if v is None:
+        return ""
+    if v.amount is not None:
+        return rs(v.amount.amount)
+    return " / ".join(f"{b.rate_percent:g}%" for b in v.bands or [])
+
+
 def tampered_markdown(t: Tampering) -> list[str]:
     """The rejected rewrite, one line per step, with the changed figure and citation marked."""
     out = []
@@ -78,7 +92,7 @@ def tampered_markdown(t: Tampering) -> list[str]:
 # ---------------- UI: input ----------------
 st.set_page_config(page_title="J26-DS-303 Tax Assistant", layout="wide")
 st.title("Explainable Agentic AI Tax Assistant")
-st.caption("C1 demo · YA 2025/26 · the engine does the math, the LLM only rephrases")
+st.caption("C1 demo · the engine does the math, the LLM only rephrases · law from C3")
 
 with st.sidebar:
     st.header("Input")
@@ -90,6 +104,21 @@ with st.sidebar:
         apit = to_decimal(st.text_input("APIT already paid (Rs)", "50000"), "APIT")
     else:
         docs = (PAYSLIPS[st.selectbox("Payslip", list(PAYSLIPS))],)
+
+    st.header("Law (C3)")
+    env_now = load_env()
+    live_c3 = st.toggle(
+        "Live C3 GraphRAG",
+        value=env_now.get("C1_RETRIEVAL", "mock").strip().lower() == "http",
+        help="On: rules come from C3's knowledge graph (POST /retrieve). Off: mock rules.",
+    )
+    c3_url = env_now.get("C3_API_URL", C3_DEFAULT_URL)
+    if live_c3:
+        st.caption(f"C3 API: {c3_url}")
+        year = st.selectbox("Year of assessment", LIVE_YEARS)
+    else:
+        year = "2025/26"
+        st.caption("Mock rules · YA 2025/26 only")
 
     st.header("Options")
     use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
@@ -118,15 +147,16 @@ elif use_gemini:
         st.error(str(e))
         st.stop()
 
+retrieval = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
 deps = Deps(  # built fresh each run: the assurance mock consumes its script
     ocr=MockOcrClient(),
-    retrieval=MockRetrievalClient(),
+    retrieval=retrieval,
     assurance=MockAssuranceClient(["REGENERATE"] if force_regen else []),
     explainer_llm=llm,
 )
 request = TaxRequest(
     request_id=f"req-{random.randint(1, 9999):04d}",
-    year_of_assessment="2025/26",
+    year_of_assessment=year,
     employment_income=income,
     apit_paid=apit,
     documents=docs,
@@ -169,6 +199,27 @@ if calc:
                     "Source": str(s.source),
                 }
                 for s in calc.steps
+            ]
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+
+law = getattr(retrieval, "last", None)
+if law is not None:
+    st.subheader(f"Law used · from C3 GraphRAG, in force on {law.query.as_of_date}")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Rule": r.rule_id,
+                    "Value": law_value(r),
+                    "Valid": f"{r.validity.valid_from} .. {r.validity.valid_to or 'now'}",
+                    "Source": r.source.citation,
+                    "C3 confidence": f"{r.confidence.score:.2f}",
+                }
+                for r in law.results
+                if r.validity.in_force_on_as_of_date
             ]
         ),
         hide_index=True,
