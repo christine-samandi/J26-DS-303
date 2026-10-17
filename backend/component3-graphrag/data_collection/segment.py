@@ -34,7 +34,10 @@ _CHAPTER = re.compile(r"^CHAPTER\s+[IVXLC]+$")
 _DIVISION = re.compile(r"^Division\s+[IVXLC]+\s*:\s*\S.*$")
 _ENACTING = re.compile(r"^\s*BE\s+it\s+enacted\b", re.IGNORECASE)
 _SECTION = re.compile(r"^(?P<num>\d{1,3})(?P<suffix>[A-Z]{0,2})\.\s+(?P<rest>[(\"“A-Z].*)$")
-_SUBSECTION = re.compile(r"(?:^|\n)\((?P<num>\d{1,2})(?P<suffix>[A-Z]{0,2})\)\s+")
+# "(2) " at a line start, but not a reference such as "(2) of that paragraph" or "(2) and (3)"
+_SUBSECTION = re.compile(
+    r"(?:^|\n)\((?P<num>\d{1,2})(?P<suffix>[A-Z]{0,2})\)\s+(?!(?:of|and|or|to)\b)"
+)
 _CERTIFIED = re.compile(
     r"\[\s*Certified\s+on\s+(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([A-Za-z]+),?\s+(\d{4})\s*\]",
     re.IGNORECASE,

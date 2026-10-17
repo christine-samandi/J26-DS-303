@@ -276,3 +276,40 @@ def build_real_layout_act(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+def build_ruled_rate_table(path: Path) -> Path:
+    """One page with a ruled two-column rate table whose cells wrap onto two or three lines,
+    as in the First Schedule: read line by line, the two columns interleave."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    p = doc.new_page(width=W, height=H)
+    p.insert_text((144, 167), "1", fontsize=10)
+    p.insert_text((184, 167), "Test Revenue Act, No. 7 of 2030", fontsize=10)
+    p.insert_text((144, 200), "shall be taxed at the following rates:", fontsize=10)
+    left, mid, right, top = 144.0, 290.0, 440.0, 215.0
+    rows = [
+        (["Taxable Income"], ["Tax Payable"]),
+        (["Not exceeding Rs. 100"], ["6% of the amount in", "excess of Rs. 0"]),
+        (
+            ["Exceeding Rs. 100 but not", "exceeding Rs. 200"],
+            ["Rs. 6 plus 12% of the", "amount in excess of", "Rs. 100"],
+        ),
+    ]
+    y = top
+    p.draw_line((left, y), (right, y))
+    for cell_a, cell_b in rows:
+        height = 12 * max(len(cell_a), len(cell_b)) + 8
+        for i, text in enumerate(cell_a):
+            p.insert_text((left + 4, y + 14 + 12 * i), text, fontsize=8)
+        for i, text in enumerate(cell_b):
+            p.insert_text((mid + 4, y + 14 + 12 * i), text, fontsize=8)
+        y += height
+        p.draw_line((left, y), (right, y))
+    for x in (left, mid, right):
+        p.draw_line((x, top), (x, y))
+    p.insert_text((144, y + 30), "(2) The next subparagraph of the schedule.", fontsize=10)
+    doc.save(path)
+    doc.close()
+    return path

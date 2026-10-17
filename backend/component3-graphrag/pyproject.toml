@@ -23,6 +23,7 @@ ingest = [
 ]
 nlp = [
     "spacy>=3.7",
+    "openpyxl>=3.1",  # annotation workbook (ground_truth/entity_annotations.xlsx)
 ]
 graph = [
     "neo4j>=5.20",

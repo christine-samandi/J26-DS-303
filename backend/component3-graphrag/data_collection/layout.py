@@ -10,7 +10,9 @@ Inland Revenue Acts in the corpus:
 - marginal notes (the short section titles) beside each section, in a smaller font (8pt beside
   10pt text), on the right of some pages and the left of others (the pages are mirrored, and
   heavily indented pages give no reliable column edge);
-- schedules printed entirely in 8pt, the same size as the notes.
+- schedules printed entirely in 8pt, the same size as the notes;
+- ruled tables (tax rate bands, and the "Column I / II / III" tables of commencement dates in
+  amendment Acts), read cell by cell so wrapped cells do not interleave.
 
 So a marginal note is a line that is (a) smaller than the main text and (b) wholly left or right
 of every main-size line on its page. The main size is the Act's (10pt) on pages that carry
@@ -23,6 +25,8 @@ the thresholds below can be tuned against the real documents.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import statistics
 from collections import Counter
@@ -37,7 +41,8 @@ NOTE_SMALLER = 1.0  # a note's font is at least this much smaller than the main 
 
 _PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?\d{1,4}\s*$", re.IGNORECASE)
 _NUMBER_TOKEN = re.compile(r"^\s*(?:\d{1,3}[A-Z]?\.|\(\d{1,2}[A-Z]?\)|\([a-z]{1,4}\))\s*$")
-_PRINTER_CODE = re.compile(r"\bPL\s*\d{3,}")  # "2 PL 005318—–2,962 (07/2017)"
+# printer codes "2 PL 005318—–2,962 (07/2017)" and the printer's line after the last section
+_PRINTER_CODE = re.compile(r"\bPL\s*\d{3,}|^PRINTED AT THE DEPARTMENT OF GOVERNMENT PRINTING")
 
 
 @dataclass
@@ -69,7 +74,7 @@ def _norm_repeat(text: str) -> str:
     return re.sub(r"\d+", "#", " ".join(text.split())).lower()
 
 
-def read_pages(pdf_path: Path) -> list[Page]:
+def read_pages(pdf_path: Path, tables: bool = True) -> list[Page]:
     import pymupdf
 
     pages: list[Page] = []
@@ -86,9 +91,58 @@ def read_pages(pdf_path: Path) -> list[Page]:
                     size = max(span["size"] for span in ln["spans"])
                     x0, y0, x1, y1 = ln["bbox"]
                     page.lines.append(Line(index, x0, y0, x1, y1, size, text.strip()))
+            if tables and _may_hold_table(page, pdf_page):
+                _replace_table_lines(page, pdf_page)
             page.lines.sort(key=lambda ln: (round(ln.y0, 1), ln.x0))
             pages.append(page)
     return pages
+
+
+_TABLE_CONTENT = re.compile(r"Rs\.|%|\b\d{2}\.\d{2}\.\d{4}\b|\bColumn\s+I", re.IGNORECASE)
+
+
+def _cell(text: str | None) -> str:
+    text = " ".join((text or "").replace("-\n", "-").split())
+    return re.sub(r"(\w)- ([a-z])", r"\1\2", text)
+
+
+def _may_hold_table(page: Page, pdf_page) -> bool:
+    """Cheap test before the slow table finder: table-like text and some ruled lines."""
+    if not any(_TABLE_CONTENT.search(ln.text) for ln in page.lines):
+        return False
+    return bool(pdf_page.get_drawings())
+
+
+def _replace_table_lines(page: Page, pdf_page) -> None:
+    """Read ruled tables cell by cell: one line per table row, cells joined with " | ".
+
+    Without this, a cell that wraps onto two lines is merged with the next column by y
+    position ("Not exceeding Rs. 3 6% of the million amount"). Tables with no amounts,
+    rates, dates or "Column I" headings are ignored (stray boxes around quoted text).
+    """
+    with contextlib.redirect_stdout(io.StringIO()):  # PyMuPDF prints an advert on first use
+        found = pdf_page.find_tables().tables
+    for table in found:
+        rows = table.extract()
+        cells = [[_cell(c) for c in row] for row in rows]
+        if not any(_TABLE_CONTENT.search(c) for row in cells for c in row):
+            continue
+        x0, y0, x1, y1 = table.bbox
+        inside = [
+            ln
+            for ln in page.lines
+            if x0 - 1 <= (ln.x0 + ln.x1) / 2 <= x1 + 1 and y0 - 1 <= (ln.y0 + ln.y1) / 2 <= y1 + 1
+        ]
+        if not inside:
+            continue
+        size = max(ln.size for ln in inside)
+        for ln in inside:
+            page.lines.remove(ln)
+        for row, texts in zip(table.rows, cells, strict=False):
+            text = " | ".join(c for c in texts if c)
+            if text:
+                rx0, ry0, rx1, ry1 = row.bbox
+                page.lines.append(Line(page.number, x0, ry0, x1, ry1, size, text, kind="body"))
 
 
 def _dedup(spans: list[dict]) -> list[dict]:
