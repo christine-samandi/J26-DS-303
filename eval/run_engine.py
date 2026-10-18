@@ -58,7 +58,7 @@ class Outcome:
 
 
 def load_scenario(path: Path) -> dict:
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         return json.load(f, parse_float=Decimal)
 
 
@@ -138,7 +138,7 @@ def money(value: Decimal | None) -> str:
 
 
 def write_csv(path: Path, outcomes: list[Outcome]) -> None:
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for o in outcomes:
@@ -190,7 +190,7 @@ def write_markdown(path: Path, outcomes: list[Outcome], sha: str, run_at: str) -
             "; ".join(o.mismatches).replace("|", "\\|") or "",
         ]
         lines.append("| " + " | ".join(str(c) for c in cells) + " |")
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def run(scenario_dir: Path, out_dir: Path) -> tuple[list[Outcome], Path, Path]:

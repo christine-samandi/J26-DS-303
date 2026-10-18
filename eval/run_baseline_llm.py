@@ -328,7 +328,7 @@ def evaluate(
 
 
 def write_csv(path: Path, outcomes: list[Outcome]) -> None:
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for o in outcomes:
@@ -349,7 +349,7 @@ def write_csv(path: Path, outcomes: list[Outcome]) -> None:
 
 
 def write_raw(path: Path, outcomes: list[Outcome]) -> None:
-    with path.open("w") as f:
+    with path.open("w", encoding="utf-8") as f:
         for o in outcomes:
             record = {
                 "scenario_id": o.scenario_id,
@@ -427,7 +427,7 @@ def write_markdown(
             notes.replace("|", "\\|"),
         ]
         lines.append("| " + " | ".join(str(c) for c in cells) + " |")
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def prompt_sha256(variant: PromptVariant = WITH_RULES) -> str:
@@ -487,7 +487,7 @@ def run(
         "prompt_sha256": prompt_sha256(variant),
         "scenarios": [o.scenario_id for o in outcomes],
     }
-    stem.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    stem.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return outcomes, md_path
 
 
@@ -513,7 +513,7 @@ def read_run_info(csv_path: Path) -> RunInfo | None:
     stem = csv_path.with_suffix("")
     meta = stem.with_suffix(".meta.json")
     if meta.exists():
-        m = json.loads(meta.read_text())
+        m = json.loads(meta.read_text(encoding="utf-8"))
         return RunInfo(
             stem.name,
             m["git_sha"],
@@ -525,7 +525,7 @@ def read_run_info(csv_path: Path) -> RunInfo | None:
     md = stem.with_suffix(".md")
     if not md.exists():
         return None
-    text = md.read_text()
+    text = md.read_text(encoding="utf-8")
     found = [
         re.search(pattern, text, re.M)
         for pattern in (
@@ -577,7 +577,7 @@ def earlier_answers(
     answers: dict[str, Outcome] = {}
     skipped: list[str] = []
     for path in sorted(out_dir.glob(f"{variant.run_prefix}*.csv")):  # names sort by run time
-        with path.open(newline="") as f:
+        with path.open(newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             header = list(reader.fieldnames or [])
@@ -633,7 +633,7 @@ def merge(
 def _read_raw(path: Path) -> dict[str, dict]:
     if not path.exists():
         return {}
-    records = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    records = (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
     return {r["scenario_id"]: r for r in records}
 
 
