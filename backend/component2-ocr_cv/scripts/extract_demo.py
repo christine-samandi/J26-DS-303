@@ -17,7 +17,7 @@ from pathlib import Path
 import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from entity_extraction.payslip import extract_payslip, to_contract_json  # noqa: E402
+from entity_extraction.payslip import extract_document, to_contract_json  # noqa: E402
 from ocr_engines.tesseract_engine import run_tesseract  # noqa: E402
 from preprocessing import preprocess  # noqa: E402
 
@@ -43,7 +43,7 @@ def main() -> int:
         res = preprocess(img)
         tokens = run_tesseract(res.image, lang=args.lang)   # boxes stay in straightened coordinates
         to_original = res.to_original_bbox                  # final boxes are mapped back to the photo
-    result, report = extract_payslip(tokens, doc_id=path.stem, processing_ms=int((time.time() - t0) * 1000),
+    result, report = extract_document(tokens, doc_id=path.stem, processing_ms=int((time.time() - t0) * 1000),
                                      to_original=to_original)
 
     out = Path(args.out)
@@ -52,6 +52,9 @@ def main() -> int:
     (out / f"{path.stem}_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"\n{path.name}  ({'raw' if args.raw else 'preprocessed'}, {result.processing_ms} ms)")
+    cls = report.get("classification", {})
+    print(f"document type: {result.document_type} (confidence {cls.get('confidence')}) - {cls.get('reason')}")
+    print(f"languages: {', '.join(result.languages)}")
     print(f"{'field':18s}{'value':>16s}  {'conf':>5s}  review  OCR text")
     for f in result.extracted_fields:
         v = f"{f.value:,.2f}" if isinstance(f.value, float) else str(f.value)
