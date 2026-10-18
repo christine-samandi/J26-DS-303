@@ -36,8 +36,15 @@ from scripts.dataset import DATA, read_manifest  # noqa: E402
 from scripts.metrics import (FieldResult, cer_wer, expected_calibration_error,  # noqa: E402
                              precision_recall_f1, review_quality, score_fields)
 
-# engine name -> function(image, lang) -> tokens. PaddleOCR is added here later; nothing else changes.
-ENGINES: Dict[str, Callable] = {"tesseract": lambda img, lang: run_tesseract(img, lang=lang)}
+
+
+def _paddle(img, lang):
+    from ocr_engines.paddle_engine import paddle_lang, run_paddle   # only needed when --engines has paddle
+    return run_paddle(img, lang=paddle_lang(lang))
+
+
+# engine name -> function(image, tesseract-style lang) -> tokens. Same pipeline after this step.
+ENGINES: Dict[str, Callable] = {"tesseract": lambda img, lang: run_tesseract(img, lang=lang), "paddle": _paddle}
 MODES = ("raw", "pre")
 LANG_CODES = {"en": "eng", "si": "sin", "ta": "tam"}
 
