@@ -52,3 +52,23 @@ Only YA 2025/26 has seed rules, so other years show "not cross-checked".
 from orchestrator.clients import retrieval_client_from_env
 deps = Deps(MockOcrClient(), retrieval_client_from_env({"C1_RETRIEVAL": "http"}), MockAssuranceClient())
 ```
+
+## Live C2 (OCR) instead of the mock payslips
+
+`HttpOcrClient` uploads the user's payslip to C2's service (`POST /extract`, ocr_output v0.1)
+and maps the answer to C1's `OcrResult`: `gross_income` -> `employment_income`,
+`apit` -> `apit_paid`, keeping C2's per-field confidence (it feeds C1's confidence score).
+It asks C2's `/health` which OCR languages are installed and uses those of sin/tam/eng.
+
+A payslip is usually one month; the tax is for the year. "The payslip covers" decides the
+scaling (one month -> x 12, annual summary -> x 1). The scaling is an assumption, so the demo
+shows it ("Annualised: ...") next to what C2 read. A document C2 does not read as a payslip,
+a C2 error or C2 being down ends the request as `failed` with the reason.
+
+1. Start C2 (in `backend/component2-ocr_cv`, its own venv, Tesseract installed):
+   `uvicorn api.main:app --port 8000`
+2. In the demo: Source -> **Upload payslip (live C2 OCR)**, upload the image or PDF.
+   `C2_API_URL` changes the address (default `http://localhost:8000`).
+
+The **Document read by C2 OCR** table shows every field with its confidence and which ones C1
+used, and C2's `/extract/visual` image shows where each value was read.
