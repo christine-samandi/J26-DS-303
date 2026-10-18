@@ -25,7 +25,12 @@ from j26_contracts.retrieval import RetrievalRequest
 
 from explanation_agent.explainer import TextLLM
 from explanation_agent.explainer import explain as explain_steps
-from orchestrator.clients import AssuranceClient, OcrClient, RetrievalClient
+from orchestrator.clients import (
+    AssuranceClient,
+    ComponentUnavailable,
+    OcrClient,
+    RetrievalClient,
+)
 from orchestrator.confidence import REVIEW_THRESHOLD, c1_confidence
 from orchestrator.models import (
     MAX_ATTEMPTS,
@@ -108,18 +113,20 @@ def retrieve(state: PipelineState, deps: Deps) -> Update:
         as_of, _ = ya_period(ya)
     except RuleSetError as e:
         raise StageError(str(e)) from e
-    output = deps.retrieval.retrieve(
-        RetrievalRequest(
-            schema_version="1.0.0",
-            request_id=request.request_id,
-            caller="c1-orchestrator",
-            query_text=RETRIEVAL_QUERY,
-            as_of_date=as_of,
-            income_types=["employment"],
-            taxpayer_category="resident_individual",
-            rule_types=["relief", "tax_slab"],
-        )
+    retrieval_request = RetrievalRequest(
+        schema_version="1.0.0",
+        request_id=request.request_id,
+        caller="c1-orchestrator",
+        query_text=RETRIEVAL_QUERY,
+        as_of_date=as_of,
+        income_types=["employment"],
+        taxpayer_category="resident_individual",
+        rule_types=["relief", "tax_slab"],
     )
+    try:
+        output = deps.retrieval.retrieve(retrieval_request)
+    except ComponentUnavailable as e:
+        raise StageError(str(e)) from e
     if output.request_id != request.request_id:
         raise StageError(f"C3 answered request {output.request_id}, not {request.request_id}")
     try:

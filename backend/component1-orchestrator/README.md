@@ -33,3 +33,22 @@ result = run(TaxRequest(request_id="req-0001", year_of_assessment="2025/26",
                         documents=("payslip_clean",)), deps)
 result.status, result.attempt, result.calc.total_tax   # ('delivered', 2, Decimal('96000.00'))
 ```
+
+## Live C3 (GraphRAG) instead of the mock
+
+`HttpRetrievalClient` calls C3's real service (`POST /retrieve`, the frozen retrieval contract,
+validated both ways with `j26_contracts`). If C3 is down or answers outside the contract, the
+request ends as `failed` with the reason, never with made-up rules.
+
+1. Start C3 (in `backend/component3-graphrag`, Neo4j running, `.env` has `C3_MODE=graphrag`):
+   `uvicorn retrieval_api.app:app --port 8003`
+2. In the demo sidebar, turn on **Live C3 GraphRAG** and pick a year of assessment. Or set it in
+   `.env`: `C1_RETRIEVAL=http` (and `C3_API_URL`, default `http://localhost:8003`).
+
+The **Law used** table shows the rules C3 returned: value, validity dates and the Act + provision.
+Only YA 2025/26 has seed rules, so other years show "not cross-checked".
+
+```python
+from orchestrator.clients import retrieval_client_from_env
+deps = Deps(MockOcrClient(), retrieval_client_from_env({"C1_RETRIEVAL": "http"}), MockAssuranceClient())
+```
