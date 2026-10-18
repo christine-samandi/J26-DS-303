@@ -72,3 +72,57 @@ def test_unknown_document_gets_no_tax_fields():
 def test_payslip_still_extracted():
     out, report = extract_document(toks(PAYSLIP), doc_id="PS")
     assert out.document_type == "payslip" and report["classification"]["document_type"] == "payslip"
+
+
+# --- Bank statements written in codes (B/F, ATM, POS), like real scanned statements -------------
+# Made-up numbers. Each row: date, code, amount, running balance.
+STATEMENT_ROWS = [
+    "251001 B/F 10,000.00",
+    "251001 ATM 2,000.00 8,000.00",
+    "251003 POS 1,250.50 6,749.50",
+    "251005 SALARY 50,000.00 56,749.50",
+    "251007 POS 749.50 56,000.00",
+    "251010 SMS 50.00 55,950.00",
+    "251012 ATM 5,000.00 50,950.00",
+]
+
+
+def test_code_style_statement_is_bank_statement():
+    # Before: only 'deposit'-style words counted, so this came back 'unknown' (or receipt via POS).
+    c = classify_text("\n".join(STATEMENT_ROWS))
+    assert c.document_type == "bank_statement"
+    assert any(e.startswith("[layout]") for e in c.evidence["bank_statement"])
+    assert c.scores["receipt"] == 0                 # POS is a statement code here, not receipt evidence
+
+
+def test_running_balance_alone_is_evidence():
+    # Garbled words, but the arithmetic still holds -> bank statement
+    rows = [r.split()[0] + " x " + " ".join(r.split()[2:]) for r in STATEMENT_ROWS]
+    assert classify_text("\n".join(rows)).document_type == "bank_statement"
+
+
+def test_table_whose_balances_do_not_add_up_is_not_evidence():
+    rows = ["1 100.00 900.00", "2 250.00 300.00", "3 75.00 5,000.00", "4 10.00 42.00", "5 60.00 1.00", "6 3.00 70.00"]
+    c = classify_text("\n".join(rows))
+    assert c.document_type == "unknown" and c.scores["bank_statement"] == 0
+
+
+def test_receipt_item_lines_stay_receipt():
+    receipt = ["KEELLS SUPER Receipt", "Milk 2 250.00 500.00", "Bread 1 180.00 180.00", "Rice 5 220.00 1,100.00",
+               "Eggs 10 45.00 450.00", "Tea 1 650.00 650.00", "Subtotal 2,880.00", "Cash 3,000.00",
+               "Change 120.00", "Thank you"]
+    assert classify_text("\n".join(receipt)).document_type == "receipt"
+
+
+@dataclass
+class LineTok:
+    text: str
+    confidence: float
+    bbox: list
+    line_id: str
+
+
+def test_tokens_keep_their_lines():
+    # classify_tokens must rebuild rows from line_id, otherwise the balance check sees one long line
+    tokens = [LineTok(w, 0.9, [0, 0, 10, 10], f"1_1_{i}") for i, row in enumerate(STATEMENT_ROWS) for w in row.split()]
+    assert classify_tokens(tokens).document_type == "bank_statement"
