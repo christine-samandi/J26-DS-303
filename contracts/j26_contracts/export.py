@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from j26_contracts import retrieval
+from j26_contracts import retrieval, trace
 
 SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "schemas"
 REPO_URL = "https://github.com/christine-samandi/J26-DS-303"
@@ -29,6 +29,11 @@ SCHEMAS: dict[str, tuple[type[BaseModel], str]] = {
         retrieval.RetrievalOutput,
         "Response from Component 3, consumed by C1 (calculation, citations) and C4 (verification)."
         " Owner: C3.",
+    ),
+    "pipeline_trace.schema.json": (
+        trace.PipelineTrace,
+        "Everything C1 computed for one attempt of one request, sent to Component 4 (output"
+        " assurance) for verification. Owner: C1. PROPOSAL v0.1.0, not yet agreed.",
     ),
 }
 
