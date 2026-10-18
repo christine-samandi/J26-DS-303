@@ -4,7 +4,7 @@ Why this module exists: the web API, the demo script and the benchmark must all 
 the same steps (deterministic: same input -> same output). Keeping the order in one place
 means a change to the pipeline is made once and tested once.
 
-    upload bytes -> image -> preprocessing -> Tesseract -> field extraction ->
+    upload bytes -> image -> preprocessing -> Tesseract -> document classification -> field extraction ->
     fiscal self-correction -> confidence -> contract JSON (+ explanation report)
 Everything happens in memory; nothing is written to disk (NFR4).
 """
@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from api.schema import OCROutput
-from entity_extraction.payslip import extract_payslip
+from entity_extraction.payslip import extract_document
 from ocr_engines.tesseract_engine import run_tesseract
 from preprocessing import preprocess
 
@@ -71,7 +71,7 @@ def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_pr
         to_original = res.to_original_bbox              # final boxes mapped back to the upload
     else:
         tokens = run_tesseract(img, lang=lang)
-    out, report = extract_payslip(tokens, doc_id=doc_id, engine=engine_name,
+    out, report = extract_document(tokens, doc_id=doc_id, engine=engine_name,
                                   processing_ms=int((time.time() - t0) * 1000), to_original=to_original)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
     return out, report
