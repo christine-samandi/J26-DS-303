@@ -18,7 +18,8 @@ import cv2
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from api.pipeline import UnsupportedFile, available_languages, draw_fields, process_upload
+from api.pipeline import (Engine, EngineUnavailable, UnsupportedFile, available_languages, draw_fields,
+                          process_upload)
 from api.schema import OCROutput
 
 app = FastAPI(
@@ -42,13 +43,20 @@ def _check_lang(lang: str) -> None:
                                  f"Installed: {', '.join(sorted(installed))}")
 
 
-def _run(file: UploadFile, lang: str, preprocess: bool, doc_id: Optional[str]):
+ENGINE_HELP = ("tesseract (default, reads Sinhala/Tamil/English) | paddle (English/Tamil) | "
+               "fusion (both engines; fiscal rules decide disagreements)")
+
+
+def _run(file: UploadFile, lang: str, preprocess: bool, doc_id: Optional[str], engine: str = "tesseract"):
     _check_lang(lang)
     data = file.file.read()
     try:
-        return process_upload(data, file.filename or "", doc_id=doc_id, lang=lang, use_preprocessing=preprocess)
+        return process_upload(data, file.filename or "", doc_id=doc_id, lang=lang, use_preprocessing=preprocess,
+                              engine=engine)
     except UnsupportedFile as e:
         raise HTTPException(415, str(e)) from e
+    except EngineUnavailable as e:
+        raise HTTPException(503, str(e)) from e
 
 
 @app.get("/health")
@@ -66,26 +74,30 @@ def health() -> dict:
 def extract(file: UploadFile = File(..., description="Photo, scan or PDF of a payslip"),
             lang: str = Query("sin+tam+eng", description=LANG_HELP),
             preprocess: bool = Query(True, description="Turn off only to compare with raw OCR"),
-            doc_id: Optional[str] = Query(None, description="Optional id; defaults to the file name")) -> OCROutput:
+            doc_id: Optional[str] = Query(None, description="Optional id; defaults to the file name"),
+            engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> OCROutput:
     """Upload one document and receive the contract JSON (contracts/schemas/ocr_output_schema.json)."""
-    return _run(file, lang, preprocess, doc_id).output
+    return _run(file, lang, preprocess, doc_id, engine).output
 
 
 @app.post("/extract/explain")
 def extract_explain(file: UploadFile = File(...), lang: str = Query("sin+tam+eng", description=LANG_HELP),
-                    preprocess: bool = Query(True), doc_id: Optional[str] = Query(None)) -> dict:
+                    preprocess: bool = Query(True), doc_id: Optional[str] = Query(None),
+                    engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> dict:
     """Same as /extract, plus the explanation: every arithmetic check, every correction, and the
-    preprocessing steps applied. For reviewers and debugging, not part of the shared contract."""
-    r = _run(file, lang, preprocess, doc_id)
+    preprocessing steps applied (and, for fusion, which engine won each field and why).
+    For reviewers and debugging, not part of the shared contract."""
+    r = _run(file, lang, preprocess, doc_id, engine)
     return {"result": r.output.model_dump(exclude_none=True), "explanation": r.report}
 
 
 @app.post("/extract/visual", responses={200: {"content": {"image/png": {}}}}, response_class=Response)
 def extract_visual(file: UploadFile = File(...), lang: str = Query("sin+tam+eng", description=LANG_HELP),
-                   preprocess: bool = Query(True), doc_id: Optional[str] = Query(None)) -> Response:
+                   preprocess: bool = Query(True), doc_id: Optional[str] = Query(None),
+                   engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> Response:
     """Returns the uploaded image with a box on every extracted field
     (green = trusted, orange = needs review): shows where each value came from."""
-    r = _run(file, lang, preprocess, doc_id)
+    r = _run(file, lang, preprocess, doc_id, engine)
     ok, png = cv2.imencode(".png", draw_fields(r.image, r.output))
     if not ok:
         raise HTTPException(500, "could not draw the result image")

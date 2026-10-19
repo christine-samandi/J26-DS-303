@@ -4,15 +4,16 @@ Why this module exists: the web API, the demo script and the benchmark must all 
 the same steps (deterministic: same input -> same output). Keeping the order in one place
 means a change to the pipeline is made once and tested once.
 
-    upload bytes -> image -> preprocessing -> Tesseract -> document classification -> field extraction ->
-    fiscal self-correction -> confidence -> contract JSON (+ explanation report)
+    upload bytes -> image -> preprocessing -> OCR engine (tesseract | paddle | fusion of both) ->
+    document classification -> field extraction -> fiscal self-correction -> confidence ->
+    contract JSON (+ explanation report)
 Everything happens in memory; nothing is written to disk (NFR4).
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -22,12 +23,19 @@ from entity_extraction.payslip import extract_document
 from ocr_engines.tesseract_engine import run_tesseract
 from preprocessing import preprocess
 
+Engine = Literal["tesseract", "paddle", "fusion"]
+ENGINE_LABELS = {"tesseract": "tesseract-5", "paddle": "paddleocr-3", "fusion": "fusion(tesseract-5+paddleocr-3)"}
+
 IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 MAX_BYTES = 15 * 1024 * 1024
 
 
 class UnsupportedFile(ValueError):
     """The upload is not an image or PDF we can read."""
+
+
+class EngineUnavailable(RuntimeError):
+    """The requested OCR engine is not installed on this machine (e.g. PaddleOCR)."""
 
 
 @dataclass
@@ -61,27 +69,58 @@ def decode_upload(data: bytes, filename: str = "") -> Tuple[np.ndarray, int]:
     return img, 1
 
 
-def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preprocessing: bool = True,
-                 engine_name: str = "tesseract-5") -> Tuple[OCROutput, dict]:
+def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
+    """Run ONE reading engine. lang is Tesseract-style (sin+tam+eng); Paddle maps it to its own model."""
+    if engine == "tesseract":
+        return run_tesseract(img, lang=lang)
+    if engine == "paddle":
+        try:
+            from ocr_engines.paddle_engine import paddle_lang, run_paddle
+            return run_paddle(img, lang=paddle_lang(lang))
+        except ImportError as e:
+            raise EngineUnavailable("PaddleOCR is not installed (pip install -r requirements-paddle.txt)") from e
+    raise ValueError(f"unknown engine '{engine}'")
+
+
+def analyse(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preprocessing: bool = True,
+            engine: str = "tesseract") -> Tuple[OCROutput, dict, Sequence]:
+    """The whole pipeline for one image. Returns (contract output, explanation report, tokens used
+    for the text). The benchmark uses the tokens for CER/WER; the API only needs the first two."""
+    from entity_extraction.fusion import extract_fused
+
     t0 = time.time()
     to_original = None
+    page = img
     if use_preprocessing:
         res = preprocess(img)
-        tokens = run_tesseract(res.image, lang=lang)    # boxes in straightened coordinates
-        to_original = res.to_original_bbox              # final boxes mapped back to the upload
+        page = res.image                      # every engine reads the SAME straightened image,
+        to_original = res.to_original_bbox    # so their boxes can be compared and fused
+
+    if engine == "fusion":
+        by_engine = {"tesseract": read_tokens(page, "tesseract", lang), "paddle": read_tokens(page, "paddle", lang)}
+        out, report = extract_fused(by_engine, doc_id, to_original=to_original)
+        tokens = by_engine["tesseract"]
     else:
-        tokens = run_tesseract(img, lang=lang)
-    out, report = extract_document(tokens, doc_id=doc_id, engine=engine_name,
-                                  processing_ms=int((time.time() - t0) * 1000), to_original=to_original)
+        tokens = read_tokens(page, engine, lang)
+        out, report = extract_document(tokens, doc_id=doc_id, engine=ENGINE_LABELS.get(engine, engine),
+                                      to_original=to_original)
+    out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
+    report["engine"] = engine
+    return out, report, tokens
+
+
+def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preprocessing: bool = True,
+                 engine: str = "tesseract") -> Tuple[OCROutput, dict]:
+    out, report, _ = analyse(img, doc_id, lang=lang, use_preprocessing=use_preprocessing, engine=engine)
     return out, report
 
 
 def process_upload(data: bytes, filename: str, doc_id: Optional[str] = None, lang: str = "sin+tam+eng",
-                   use_preprocessing: bool = True) -> PipelineResult:
+                   use_preprocessing: bool = True, engine: str = "tesseract") -> PipelineResult:
     img, pages = decode_upload(data, filename)
     doc = doc_id or (filename.rsplit(".", 1)[0] if filename else "upload")
-    out, report = run_pipeline(img, doc, lang=lang, use_preprocessing=use_preprocessing)
+    out, report = run_pipeline(img, doc, lang=lang, use_preprocessing=use_preprocessing, engine=engine)
     if pages > 1:
         report["note"] = f"PDF has {pages} pages; only page 1 was processed"
     return PipelineResult(output=out, report=report, image=img, pages=pages)
