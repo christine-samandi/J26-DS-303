@@ -76,7 +76,13 @@ def reply(lines: Sequence[tuple[str, str]]) -> str:
 
 
 def run_check(explained: Explained, lines: Sequence[tuple[str, str]]) -> CheckResult:
-    return check(reply(lines), explained.steps, explained.template, explained.rules_used)
+    return check(
+        reply(lines),
+        explained.steps,
+        explained.template,
+        explained.rules_used,
+        explained.year_of_assessment,
+    )
 
 
 # --- tampering ---------------------------------------------------------------------------

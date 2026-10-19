@@ -172,7 +172,12 @@ def explain(state: PipelineState, deps: Deps) -> Update:
     rules_used = {ref.rule_id: ref.citation for ref in _refs(state["rules"])}
     rules_used = {k: v for k, v in rules_used.items() if k in retrieved}
     try:
-        outcome = explain_steps(state["calc"].steps, rules_used, deps.explainer_llm)
+        outcome = explain_steps(
+            state["calc"].steps,
+            rules_used,
+            deps.explainer_llm,
+            year_of_assessment=state["request"].year_of_assessment,
+        )
     except ValueError as e:  # a step cites a rule C3 did not return (rule 3)
         raise StageError(str(e)) from e
     return {
