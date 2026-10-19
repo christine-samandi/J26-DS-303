@@ -137,6 +137,7 @@ class OrchestratorResult(_Frozen):
     conflicts: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     stages_run: tuple[str, ...] = ()
+    pii_redacted: int = 0  # PII values redacted from the explanation prompt; not sent to C4
 
 
 class PipelineState(TypedDict, total=False):
@@ -154,6 +155,7 @@ class PipelineState(TypedDict, total=False):
     explanation: Explanation
     explain_warnings: tuple[str, ...]  # replaced on every explain run, unlike `warnings`
     llm_calls: tuple[LlmCall, ...]
+    pii_redacted: int
     confidence: ConfidenceBreakdown
     trace: PipelineTrace
     verdicts: tuple[AssuranceVerdict, ...]

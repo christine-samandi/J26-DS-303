@@ -413,6 +413,9 @@ if exp:
     st.subheader("Explanation")
     label, color = explanation_badge(exp, "rewrite" if demo_tamper else "Gemini rewrite")
     st.badge(label, color=color)
+    if exp.rewrite_status != "not_requested":  # only a prompt that was sent is redacted
+        n = result.pii_redacted
+        st.caption(f"PII redacted: {n} item{'' if n == 1 else 's'} before the LLM call")
     if demo_tamper:
         st.caption("Simulated tampered LLM output (demo mode)")
     for line in exp.lines:

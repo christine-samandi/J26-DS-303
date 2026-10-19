@@ -1,5 +1,6 @@
 """The Streamlit demo (app.py) end to end. Needs the demo extra; skipped without it (CI)."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,17 @@ class QuotaExhaustedLLM:
 
     def generate(self, prompt: str) -> tuple[str, str]:
         raise ClientError("429 RESOURCE_EXHAUSTED")
+
+
+class EchoLLM:
+    """An honest rewrite: the step lines it was sent, unchanged."""
+
+    model = "fake-gemini"
+    temperature = 0.0
+
+    def generate(self, prompt: str) -> tuple[str, str]:
+        steps = json.loads(prompt.split("Steps:\n", 1)[1].rsplit("\n\nAnswer with", 1)[0])
+        return json.dumps({"lines": steps}), "fake-gemini-001"
 
 
 def badges(at: AppTest) -> list[str]:
@@ -88,3 +100,28 @@ def test_compare_tax_years_shows_both_laws_and_the_change():
     assert "Act No. 45 of 2022" in table.loc["Relief cites", "YA 2024/25"]
     assert "Act No. 2 of 2025" in table.loc["Relief cites", "YA 2025/26"]
     assert table.loc["Bands cite", "Change"] == "changed"
+
+
+def calculate(monkeypatch, llm=None) -> AppTest:
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    if llm is not None:
+        monkeypatch.setattr(orchestrator.llm, "explainer_llm_from_env", lambda env: llm)
+        next(t for t in at.toggle if t.label == "Gemini rewrite of explanation").set_value(True)
+    next(b for b in at.button if b.label == "Calculate").click()
+    return at.run()
+
+
+def pii_notes(at: AppTest) -> list[str]:
+    return [c.value for c in at.caption if c.value.startswith("PII redacted")]
+
+
+def test_explanation_panel_shows_how_much_pii_was_redacted(monkeypatch):
+    at = calculate(monkeypatch, EchoLLM())
+    assert not at.exception
+    assert pii_notes(at) == ["PII redacted: 0 items before the LLM call"]
+
+
+def test_no_pii_note_when_no_llm_was_asked(monkeypatch):
+    at = calculate(monkeypatch)
+    assert not at.exception
+    assert pii_notes(at) == []
