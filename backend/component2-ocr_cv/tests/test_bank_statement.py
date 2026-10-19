@@ -73,3 +73,26 @@ def test_table_rule_noise_after_amount_is_ignored():
     toks = [Tok(t, 0.9, [i * 60, 0, 50, 20]) for i, t in enumerate(["CLOSING", "BALANCE", "26", "215", "08", "if", "'"])]
     label, amount = split_amount(Line(toks))
     assert [t.text for t in amount] == ["26", "215", "08"]
+
+
+# --- Layout without a 'closing balance' line (real Bank of Ceylon statement, made-up numbers) -----
+NO_CLOSING_LINE = [("Date : 10/21/25", ""), ("310725 Balance B/F", "115.17"),
+                   ("110825 BOOKED SAVINGS DEP", "5,000 00 5,115 17"), ("120825 POS CARGILLS - KOTHALAWA", "90 00 5,025 17"),
+                   ("200825 ATM SERVICE CHARGE", "5 00 5,020 17"), ("*** END OF STATEMENT ***", "")]
+
+
+def test_closing_balance_from_last_row_and_month_from_transactions():
+    out, report = extract_document(page(NO_CLOSING_LINE + [("SAVINGS STATEMENT DEPOSIT WITHDRAWAL", "")]), doc_id="BS_F2")
+    by = fields(out)
+    assert out.document_type == "bank_statement"
+    assert by["total_amount"].value == 5020.17 and by["total_amount"].needs_review
+    assert by["document_date"].value == "2025-10-21"          # printed month-first
+    assert by["pay_period"].value == "2025-08"                # transactions, not the print date
+    assert "issuer" not in by                                  # a Cargills SHOP is not Cargills Bank
+    assert any(c["rule"].startswith("previous balance") and c["passed"] for c in report["checks"])
+
+
+def test_amounts_split_at_the_decimal_point():
+    from entity_extraction.bank_statement import row_amounts
+    toks = [Tok(t, 0.9, [0, 0, 1, 1]) for t in "1,000 00 4,118 17".split()]
+    assert row_amounts(toks) == [1000.0, 4118.17]
