@@ -57,7 +57,9 @@ DATE_PATTERNS = [
 
 
 def parse_date(text: str) -> Optional[date]:
-    """'29/07/24', '29JUL24', '17 June 2025', '2024-07-29' -> date (day first, as printed in Sri Lanka)."""
+    """'29/07/24', '29JUL24', '17 June 2025', '2024-07-29' -> date (day first, as printed in Sri Lanka).
+    OCR sometimes splits a date with a space ('29/0 2/24'), which is joined first."""
+    text = re.sub(r"(?<=[/.-])(\d)\s+(\d)(?=[/.-])", r"\1\2", text)
     for pat, kind in DATE_PATTERNS:
         for m in pat.finditer(text):
             try:
@@ -76,18 +78,41 @@ def parse_date(text: str) -> Optional[date]:
     return None
 
 
-CENTS = re.compile(r"\d[.,\s]\d{2}$")
+CENTS = re.compile(r"\d[.,\s][0-9OoDQ]{2}$")      # 'o8' is OCR for '08'
+
+
+def statement_lines(tokens) -> List[Line]:
+    """Rows of the statement. Tesseract's own line ids keep each table row separate; grouping by
+    box position (used for payslips) merged several rows of a large, slightly tilted statement photo
+    ('CLOSING BALANCE 200 000 ob 200 000 ... 26 215 08'). Geometric grouping is the fallback
+    (e.g. PaddleOCR tokens, whose line ids already come from geometry)."""
+    ids = [getattr(t, "line_id", "") for t in tokens]
+    if not tokens or any(not i or str(i).startswith("p_") for i in ids):
+        return group_lines(tokens)
+    rows: Dict[str, list] = {}
+    for t, i in zip(tokens, ids):
+        if t.text.strip():
+            rows.setdefault(i, []).append(t)
+    lines = [Line(sorted(ts, key=lambda t: t.bbox[0])) for ts in rows.values()]
+    return sorted(lines, key=lambda ln: ln.top)
 
 
 def _amount(line: Line):
-    """Statement amounts are always printed with cents; anything else ('4', '50,000') is OCR noise
-    from the table and must not be used as a balance."""
+    """Last money value printed with cents on a labelled line (closing balance, totals).
+    Statement amounts always have cents; stray digits from table rules ('26 215 08 | 4') and values
+    without cents ('50,000') are ignored, so they are never used as a balance."""
     _, amount = split_amount(line)
-    if not amount:
-        return None, None
     raw = " ".join(t.text for t in amount)
-    p = parse_amount(raw)
-    return (p, amount) if p and CENTS.search(raw.strip()) else (None, None)
+    p = parse_amount(raw) if amount else None
+    if p and CENTS.search(raw.strip()):
+        return p, amount
+    values = row_amounts(line.tokens)             # fall back: read money values from the whole row
+    if not values:
+        return None, None
+    digit_toks = [t for t in line.tokens if any(ch.isdigit() for ch in t.text)][-3:] or line.tokens[-1:]
+    p = parse_amount(f"{values[-1]:.2f}")
+    p.corrected = True                            # rebuilt from a noisy row: mark as cleaned
+    return p, digit_toks
 
 
 def _conf(tokens) -> float:
@@ -154,7 +179,8 @@ def _find_date(lines: List[Line]):
 TXN_DATE = re.compile(r"^\W*(\d{2})(\d{2})(\d{2})\b|^\W*(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*(\d{2})\b",
                       re.I)
 END = re.compile(r"end of statement|closing", re.I)
-MONEY = re.compile(r"\d{1,3}(?:,\d{3})+[.\s]\d{2}(?!\d)|\d+[.\s]\d{2}(?!\d)")
+# Money with cents: comma thousands ('4,118 17'), space thousands ('26 215 08') or plain ('5 00', '26.93').
+MONEY = re.compile(r"\d{1,3}(?:,\d{3})+[.\s]\d{2}(?!\d)|\d{1,3}(?: \d{3})+[.\s]\d{2}(?!\d)|\d+[.\s]\d{2}(?!\d)")
 
 
 def row_amounts(tokens) -> List[float]:
@@ -162,8 +188,7 @@ def row_amounts(tokens) -> List[float]:
     its decimal point ('4,118 17') and misreads 0 as @ inside numbers ('5 0@')."""
     text = " ".join(t.text for t in tokens)
     text = re.sub(r"(?<=\d)[@Oo](?=\d|\b)|(?<=\s)[@Oo](?=\d)", "0", text)
-    return [float(re.sub(r"[,\s]", "", m.replace(" ", ".", 1) if "." not in m else m).replace(",", ""))
-            for m in MONEY.findall(text)]
+    return [int(re.sub(r"\D", "", m)) / 100 for m in MONEY.findall(text)]   # every match ends in 2-digit cents
 
 
 def _transactions(lines: List[Line]):
@@ -210,7 +235,7 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
                            processing_ms: Optional[int] = None,
                            to_original: Optional[Callable[[List[int]], List[int]]] = None,
                            languages: Optional[List[str]] = None) -> Tuple[OCROutput, dict]:
-    lines = group_lines(tokens)
+    lines = statement_lines(tokens)
     found: Dict[str, Tuple[float, object, Line]] = {}
     for ln in lines:
         for key, pat in LABELS.items():
@@ -292,8 +317,17 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
         add("issuer", issuer, iln.text, _conf(iln.tokens) * (1.0 if where == "header" else 0.85), iln.tokens)
         notes["issuer"] = [f"bank identified from its name words in the {where} (list of Sri Lankan banks)"]
     d, dln = _find_date(lines)
+    date_note = None
+    if not d:
+        # Header date unreadable (split across lines): the closing-balance row carries the statement's end date.
+        for ln in lines:
+            if LABELS["closing"].search(ln.text) and (d := parse_date(ln.text)):
+                dln, date_note = ln, "statement date taken from the closing-balance row (header date unreadable)"
+                break
     if d:
-        add("document_date", d.isoformat(), dln.text, _conf(dln.tokens), dln.tokens)
+        add("document_date", d.isoformat(), dln.text, _conf(dln.tokens) * (0.9 if date_note else 1.0), dln.tokens)
+        if date_note:
+            notes["document_date"] = [date_note]
     if txns:
         # The statement covers the transactions, which can be months before the print date.
         last_d, _, tln = txns[-1]
