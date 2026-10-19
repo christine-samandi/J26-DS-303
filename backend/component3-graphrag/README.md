@@ -31,6 +31,7 @@ The models also enforce rules JSON Schema cannot express:
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ✅ Phase 2: 1,324 chunks, 10 entity types; blind P 0.97 / R 1.00, adjudicated P = R = 0.996 (10 core chunks) |
 | Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ✅ Phase 3: rule versions rebuilt from the Acts (8/8 exact); graph builder |
 | Vector store (ChromaDB) | `vector_store/` | ⏳ next (TF-IDF term coverage used for now) |
+| Indexing cost vs LLM extraction | `evaluation/indexing_cost.py` | ✅ whole pipeline timed on all 7 Acts (~3 s, 0 tokens, deterministic); LLM baseline (Gemini) scored on the same gold chunks |
 | GraphRAG retrieval | `retrieval_api/` | ✅ Phase 4: text + graph neighbourhood + date filter, contract output, confidence (`C3_MODE=graphrag`) |
 
 ## How to run standalone
@@ -114,6 +115,21 @@ python -m evaluation.retrieval --questions ground_truth/retrieval_questions_held
 ```
 Scores -> `data/evaluation/retrieval_scores.json` and `retrieval_per_question.csv`.
 
+**Indexing cost: this pipeline vs LLM extraction (proposal 3.4)**
+```bash
+python -m evaluation.indexing_cost                     # Part A: time every indexing stage
+pip install -e ".[llm]"                                # once, for Part B
+python -m evaluation.indexing_cost --llm gemini        # + Part B (GEMINI_API_KEY in .env)
+python -m evaluation.indexing_cost --llm gemini --price-in 0.30 --price-out 2.50
+```
+Part A times parse -> chunk -> extract -> versions -> graph rows on the whole corpus and checks
+that extraction gives the same output twice. Part B sends each gold chunk (the same 10 chunks,
+246 entities) to the LLM with the annotation guide, scores it with the same scorer
+(`entity_recognition.evaluate`), runs it twice for consistency, and projects tokens, time and
+cost to the whole corpus. Prices are not built in: take them from the provider's price page.
+Limits: the LLM is measured on the gold chunks and scaled up; results depend on the model and
+prompt (both recorded in `data/evaluation/indexing_cost.json`).
+
 **Run the retrieval API**
 ```bash
 uvicorn retrieval_api.app:app --reload --port 8003
@@ -146,4 +162,4 @@ against the output schema before it is sent.
 ## Dependency groups
 
 Install only what you need: `ingest` (scraping/PDF), `nlp` (spaCy), `graph` (Neo4j),
-`vector` (ChromaDB + sentence-transformers), `api` (FastAPI), `dev` (tests/lint), or `all`.
+`vector` (ChromaDB + sentence-transformers), `llm` (Gemini, cost baseline only), `api` (FastAPI), `dev` (tests/lint), or `all`.
