@@ -97,3 +97,47 @@ def assure_citation(
         findings=findings,
         decision=decision,
     )
+
+def assure_combined(
+    reported_total: Decimal,
+    line_items: Sequence[Decimal],
+    claims: Sequence[CitationClaim],
+    sources: Sequence[EvidenceSource],
+    regeneration_attempts: int = 0,
+) -> AssuranceResult:
+    """Verify numerical consistency and multiple citations together."""
+
+    if not claims:
+        raise ValueError("At least one citation claim is required.")
+
+    # Step 1: Verify numerical calculation independently
+    numerical_finding = check_line_item_sum(
+        reported_total=reported_total,
+        line_items=line_items,
+    )
+
+    # Step 2: Verify all citations
+    citation_findings = [
+        verify_citation(
+            claim=claim,
+            sources=sources,
+        )
+        for claim in claims
+    ]
+
+    # Step 3: Combine verification findings
+    findings = (
+        numerical_finding,
+        *citation_findings,
+    )
+
+    # Step 4: Make one final decision
+    decision = decide_assurance_action(
+        findings=findings,
+        regeneration_attempts=regeneration_attempts,
+    )
+
+    return AssuranceResult(
+        findings=findings,
+        decision=decision,
+    )
