@@ -1,6 +1,7 @@
 # real and personal documents never go to GitHub (NFR4)
 data/images/
 data/raw/
+data/other/
 data/ground_truth/
 data/manifest.csv
 outputs/

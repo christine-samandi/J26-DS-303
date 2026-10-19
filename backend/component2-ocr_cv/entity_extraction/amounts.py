@@ -40,13 +40,22 @@ def looks_numeric(text: str) -> bool:
 def parse_amount(text: str) -> Optional[ParsedAmount]:
     """'Rs. 150,000.00' -> 150000.0 ; '30,000,00' -> 30000.0 ; 'l2,OOO.OO' -> 12000.0 .
     Rule for separators: the LAST '.' or ',' is a decimal point only when exactly 1-2 digits
-    follow it; every other separator is a thousands separator."""
+    follow it; every other separator is a thousands separator.
+    Real photos often lose the decimal point: '28 775 29' or '47,958 82'. Sri Lankan payslip and
+    bank amounts always print two decimals, so a final group of exactly 2 digits after a SPACE
+    is read as the cents ('28 775 29' -> 28775.29) and the value is marked as corrected."""
     raw = text
-    t = CURRENCY.sub("", text).replace(" ", "").strip("()-+")
+    t0 = CURRENCY.sub("", text).strip().strip("()-+").strip()
+    space_cents = False
+    m = re.fullmatch(r"(.*[0-9OoIlSsBDQZzg])\s+([0-9OoIlSsBDQZzg]{2})", t0)
+    if m and not re.search(r"[.,]\d{1,2}$", m.group(1)):
+        t0 = f"{m.group(1)}.{m.group(2)}"
+        space_cents = True
+    t = t0.replace(" ", "")
     if not t or t.endswith("%"):
         return None
     fixed = "".join(CONFUSIONS.get(c, c) for c in t)
-    corrected = fixed != t
+    corrected = fixed != t or space_cents
     if not re.fullmatch(r"[0-9.,]+", fixed) or not any(c.isdigit() for c in fixed):
         return None
     last = max(fixed.rfind("."), fixed.rfind(","))

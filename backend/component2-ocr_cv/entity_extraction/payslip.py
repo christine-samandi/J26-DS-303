@@ -12,7 +12,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from api.schema import ExtractedField, OCROutput
 from entity_extraction.confidence import field_confidence, needs_review
-from entity_extraction.extractor import extract_fields
+from entity_extraction.alignment import extract_aligned
 from entity_extraction.fiscal import FiscalReport, validate_and_correct
 from entity_extraction.keywords import HELPER_FIELDS
 
@@ -52,7 +52,11 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
     different heights. `to_original` maps each final bbox back to the uploaded photo.
     `candidates` lets multi-engine fusion pass already-chosen field values; the fiscal checks,
     confidence and ontology steps below are then identical to the single-engine path."""
-    cands = candidates if candidates is not None else extract_fields(tokens)
+    alignment = {"applied": False, "reason": "fields supplied by fusion"}
+    if candidates is not None:
+        cands = candidates
+    else:
+        cands, alignment = extract_aligned(tokens)
     amounts = {f: c.value for f, c in cands.items() if isinstance(c.value, float)}
     fiscal: FiscalReport = validate_and_correct(amounts)
 
@@ -64,7 +68,7 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
         conf = field_confidence(
             c.ocr_confidence,
             verified=fiscal.verified(f) and f not in fiscal.corrections,
-            corrected=f in fiscal.corrections,
+            corrected=f in fiscal.corrections or c.realigned,
             contradicted=fiscal.contradicted(f),
             cleaned=c.cleaned,
             match_score=c.match_score,
@@ -85,6 +89,7 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
         "corrections": {f: {"ocr_value": a, "corrected_value": b} for f, (a, b) in fiscal.corrections.items()},
         "notes": {f: c.notes for f, c in cands.items() if c.notes},
         "helper_values": {f: cands[f].value for f in HELPER_FIELDS if f in cands},
+        "alignment": alignment,
     }
     return result, report
 
