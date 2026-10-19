@@ -282,6 +282,7 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
             status=status,
             attempt=state["attempt"],
             calc=None if status == "failed" else state.get("calc"),
+            rules=None if status == "failed" else state.get("rules"),
             explanation=None if status == "failed" else state.get("explanation"),
             confidence=confidence,
             verdicts=verdicts,

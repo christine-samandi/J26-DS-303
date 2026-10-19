@@ -82,6 +82,45 @@ def law_value(rule) -> str:
     return " / ".join(f"{b.rate_percent:g}%" for b in v.bands or [])
 
 
+EXCERPT_CHARS = 80
+NO_RULE = "—"
+
+
+def md_escape(text: str) -> str:
+    """Law text shown as markdown: no accidental bold, links or LaTeX."""
+    return "".join(f"\\{c}" if c in "\\`*_[]<>$#|" else c for c in text)
+
+
+def excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def rule_refs(rules) -> dict:
+    """rule_id -> RuleRef for the rules a result's steps can cite."""
+    if rules is None:
+        return {}
+    return {ref.rule_id: ref for ref in (rules.personal_relief.ref, rules.tax_bands.ref)}
+
+
+def cited_refs(steps, refs: dict) -> list:
+    """The rules cited by any step, in first-cited order."""
+    ids = dict.fromkeys(r for s in steps for r in s.citation_refs if r in refs)
+    return [refs[r] for r in ids]
+
+
+def step_law(step, refs: dict) -> tuple[str, str]:
+    """(Source, Evidence) table cells for one step; NO_RULE if it cites no rule."""
+    cited = [refs[r] for r in step.citation_refs if r in refs]
+    if not cited:
+        return NO_RULE, NO_RULE
+    source = "; ".join(r.citation for r in cited)
+    evidence = " | ".join(
+        excerpt(r.evidence) if r.evidence else "(seed rule, no excerpt)" for r in cited
+    )
+    return source, evidence
+
+
 def tampered_markdown(t: Tampering) -> list[str]:
     """The rejected rewrite, one line per step, with the changed figure and citation marked."""
     out = []
@@ -197,6 +236,7 @@ STATUS_BOX.get(result.status, st.info)(
 )
 
 calc = result.calc
+refs = rule_refs(result.rules)
 if calc:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Employment income", rs(calc.employment_income))
@@ -218,14 +258,31 @@ if calc:
                     "Operation": s.operation,
                     "Result (Rs)": f"{s.result:,.2f}",
                     "Citations": ", ".join(s.citation_refs),
-                    "Source": str(s.source),
+                    "Source": source,
+                    "Evidence": evidence,
+                    "Computed by": str(s.source),
                 }
                 for s in calc.steps
+                for source, evidence in [step_law(s, refs)]
             ]
         ),
         hide_index=True,
         width="stretch",
+        column_config={
+            "Source": st.column_config.TextColumn(help="The provision each cited rule comes from"),
+            "Evidence": st.column_config.TextColumn(
+                help=f"First {EXCERPT_CHARS} characters of the source text; full text below"
+            ),
+        },
     )
+    with st.expander("Evidence in full"):
+        for ref in cited_refs(calc.steps, refs):
+            st.markdown(f"**{md_escape(ref.citation)}** · `{ref.rule_id}`")
+            if ref.evidence:
+                st.text(ref.evidence)
+                st.caption("Chunks: " + ", ".join(ref.evidence_chunk_ids))
+            else:
+                st.caption("Seed rule: no source excerpt")
 
 read = getattr(ocr, "last", None)
 if read is not None:
@@ -293,6 +350,11 @@ if exp:
         st.caption("Simulated tampered LLM output (demo mode)")
     for line in exp.lines:
         st.markdown(f"- {line}")
+    if calc:
+        st.caption("Sources")
+        for ref in cited_refs(calc.steps, refs):
+            quote = f' — "{md_escape(excerpt(ref.evidence))}"' if ref.evidence else ""
+            st.markdown(f"- {md_escape(ref.citation)}{quote}")
     if demo_tamper and llm.last:
         with st.expander("What the AI tried to say", expanded=False):
             st.caption(

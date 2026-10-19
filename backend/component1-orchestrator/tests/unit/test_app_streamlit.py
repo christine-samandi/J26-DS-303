@@ -40,3 +40,24 @@ def test_app_shows_gray_badge_when_gemini_call_fails(monkeypatch):
     assert any(
         "explanation LLM call failed (ClientError); template text shown" in i.value for i in at.info
     )
+
+
+def test_steps_table_shows_each_steps_law_and_evidence():
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    next(b for b in at.button if b.label == "Calculate").click()
+    at.run()
+
+    assert not at.exception
+    steps = at.dataframe[0].value.set_index("Step")
+    assert {"Source", "Evidence", "Computed by"} <= set(steps.columns)
+    assert "s.5, inserting item (v) in Fifth Schedule para 2(a)" in steps.loc["S1_RELIEF", "Source"]
+    assert "s.3(1)(b), inserting First Schedule para 1(1D)" in steps.loc["S3_BAND_1", "Source"]
+    assert "personal relief of Rs. 1,800,000" in steps.loc["S1_RELIEF", "Evidence"]
+    assert all(len(e) <= 80 for e in steps["Evidence"])
+    for sid in ("S5_APIT_CREDIT", "S6_PAYABLE"):  # no APIT-credit rule yet
+        assert steps.loc[sid, "Source"] == steps.loc[sid, "Evidence"] == "—"
+
+    full = [t.value for t in at.text]
+    assert any("personal relief of Rs. 1,800,000" in t for t in full)
+    sources = [m.value for m in at.markdown if "Fifth Schedule para 2(a)" in m.value]
+    assert any("1,800,000" in s for s in sources)
