@@ -36,7 +36,7 @@ demo = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["tax_calculation_agent*", "orchestrator*", "explanation_agent*"]
+include = ["tax_calculation_agent*", "orchestrator*", "explanation_agent*", "pii*"]
 
 [tool.setuptools.package-data]
 tax_calculation_agent = ["rules/*.yaml"]
@@ -53,4 +53,4 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tax_calculation_agent", "orchestrator", "explanation_agent", "conftest"]
+known-first-party = ["tax_calculation_agent", "orchestrator", "explanation_agent", "pii", "conftest"]

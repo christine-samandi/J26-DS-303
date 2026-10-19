@@ -166,7 +166,8 @@ def explain(state: PipelineState, deps: Deps) -> Update:
 
     The rewrite is shown only if it keeps every number and citation (explanation_agent's
     post-check); otherwise the template is. Citations are limited to rules C3 returned. The
-    prompt holds only engine figures and step descriptions, no personal data.
+    prompt holds only engine figures and step descriptions, and is PII-redacted before it is
+    sent. No names are passed: C2's ocr_output v0.1 has no employee-name field.
     """
     retrieved = {r.rule_id for r in state["retrieval"].results}
     rules_used = {ref.rule_id: ref.citation for ref in _refs(state["rules"])}
@@ -184,6 +185,7 @@ def explain(state: PipelineState, deps: Deps) -> Update:
         "explanation": outcome.explanation,
         "explain_warnings": outcome.warnings,
         "llm_calls": () if outcome.llm_call is None else (outcome.llm_call,),
+        "pii_redacted": outcome.pii_redacted,
     }
 
 
@@ -295,6 +297,7 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
             conflicts=conflicts,
             warnings=_warnings(state),
             stages_run=(*state.get("stages_run", ()), "deliver"),
+            pii_redacted=state.get("pii_redacted", 0),
         )
     }
 
