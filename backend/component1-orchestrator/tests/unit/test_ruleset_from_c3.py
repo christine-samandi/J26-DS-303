@@ -36,6 +36,21 @@ def test_c1_mock_matches_the_seed_rules():
     assert mid_year_changes(rules) == []
 
 
+def test_c3_rules_carry_their_evidence_and_the_seed_has_none():
+    rules = build(c3_data())
+    relief = rules.personal_relief.ref
+    assert relief.citation.startswith("Inland Revenue (Amendment) Act No. 2 of 2025")
+    assert "s.5, inserting item (v) in Fifth Schedule para 2(a)" in relief.citation
+    assert "personal relief of Rs. 1,800,000" in relief.evidence
+    assert relief.evidence_chunk_ids == ("CHUNK-IRA-AMEND-2-2025-0001",)
+    assert "s.3(1)(b), inserting First Schedule para 1(1D)" in rules.tax_bands.ref.citation
+    assert rules.tax_bands.ref.evidence_chunk_ids == ("CHUNK-IRA-AMEND-2-2025-0002",)
+    assert (SEED.personal_relief.ref.evidence, SEED.personal_relief.ref.evidence_chunk_ids) == (
+        None,
+        (),
+    )
+
+
 def test_every_disagreement_is_reported():
     data = c3_data()
     data["results"][0]["values"]["amount"]["amount"] = 1200000

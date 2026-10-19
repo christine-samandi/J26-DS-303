@@ -2,8 +2,8 @@
 
 Used by the `Mock…Client` adapters until the real C2/C3/C4 APIs are live.
 
-> ⚠️ Placeholders. Section numbers are `TBC` and documents are marked `[C1 MOCK]`.
-> Shapes only; real rules and citations come from C3.
+> ⚠️ Stand-ins for C3, marked `[C1 MOCK]`. Provisions are copied from C3's verified ground truth
+> (`backend/component3-graphrag/ground_truth/`, rows V4 and B4); in a live run they come from C3.
 
 | File | Stands in for | Contract |
 |---|---|---|

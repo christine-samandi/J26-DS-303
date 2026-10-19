@@ -107,7 +107,7 @@ def test_no_match_from_c3_fails_cleanly():
     )
     d = deps(retrieval_path=path)
     result = run(typed(), d)
-    assert result.status == "failed" and result.calc is None
+    assert result.status == "failed" and result.calc is None and result.rules is None
     assert result.review_reasons[0].startswith("retrieve: rules for YA 2025/26 could not be")
     assert list(result.stages_run) == ["extract", "normalise", "retrieve", "deliver"]
     assert d.assurance.traces == []
@@ -226,14 +226,22 @@ def llm_deps(llm, script=()) -> Deps:
     return d
 
 
+def test_every_cited_rule_is_in_the_result_with_its_evidence():
+    result = run(typed(), deps())
+    refs = {r.rule_id: r for r in (result.rules.personal_relief.ref, result.rules.tax_bands.ref)}
+    cited = {ref for s in result.calc.steps for ref in s.citation_refs}
+    assert cited and cited <= refs.keys()
+    assert all(refs[ref].evidence and refs[ref].evidence_chunk_ids for ref in cited)
+
+
 def test_honest_explainer_rewrite_is_delivered_and_logged_in_the_trace():
     d = llm_deps(FakeExplainer())
     result = run(typed(), d)
     assert result.status == "delivered" and result.confidence.explanation == D(1)
     assert all(line.startswith("In short: ") for line in result.explanation.lines)
     assert (
-        "[Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.TBC (personal relief)]"
-        in (result.explanation.lines[0])
+        "[Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in "
+        "Fifth Schedule para 2(a) of Act No. 24 of 2017]" in (result.explanation.lines[0])
     )
     (trace,) = d.assurance.traces
     (call,) = trace.llm_calls

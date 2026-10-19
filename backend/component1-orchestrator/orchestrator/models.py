@@ -129,6 +129,7 @@ class OrchestratorResult(_Frozen):
     status: Status
     attempt: int
     calc: CalcResult | None = None
+    rules: RuleSet | None = None  # what calc's citation_refs point to (citation + evidence)
     explanation: Explanation | None = None
     confidence: ConfidenceBreakdown | None = None
     verdicts: tuple[AssuranceVerdict, ...] = ()

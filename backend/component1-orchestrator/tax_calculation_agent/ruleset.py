@@ -46,6 +46,9 @@ class RuleRef(_Frozen):
     origin: RuleOrigin
     valid_from: date
     valid_to: date | None
+    # C3's verbatim source text (evidence.matched_text) and its chunks; the seed file has none
+    evidence: str | None = None
+    evidence_chunk_ids: tuple[str, ...] = ()
 
 
 class PersonalRelief(_Frozen):
@@ -294,4 +297,6 @@ def _c3_ref(rule: RetrievedRule) -> RuleRef:
         origin="c3",
         valid_from=rule.validity.valid_from,
         valid_to=rule.validity.valid_to,
+        evidence=rule.evidence.matched_text,
+        evidence_chunk_ids=tuple(rule.evidence.chunk_ids),
     )
