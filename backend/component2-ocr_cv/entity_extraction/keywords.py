@@ -39,6 +39,8 @@ FIELD_LABELS: Dict[str, List[str]] = {
     ],
     "epf_employer": [
         "epf employer", "employer epf", "epf 12%", "epf (12%)", "epf employer 12%", "company epf",
+        "epf corporation contribution", "epf company contribution", "epf employer contribution",
+        "epf corpn contribution",
     ],
     "etf": [
         "etf", "etf 3%", "etf (3%)", "employer etf",
@@ -108,6 +110,10 @@ def match_field(label_text: str) -> Optional[Tuple[str, float, str]]:
     if best is None:
         return None
     _, field, s, p = best
+    # 'EPF Gross' / 'ETF Gross' are the BASE amounts the contributions are calculated on, not the
+    # contributions themselves; matching them as epf/etf put the wrong amount in those fields.
+    if field in ("epf_employee", "epf_employer", "etf") and "gross" in words:
+        return None
     # Percentage cue resolves EPF employee (8%) vs employer (12%) when the words alone are ambiguous.
     if field.startswith("epf_"):
         if "12%" in label:

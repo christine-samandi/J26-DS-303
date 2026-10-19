@@ -19,6 +19,8 @@ from entity_extraction.keywords import match_field
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+PERSONAL_FIELD = re.compile(r"^\W*(name|nic|number|no\b|employee|emp\b|department|designation|address|"
+                            r"account|date|period|month)\b", re.I)
 ISSUER_HINTS = re.compile(r"\b(pvt|ltd|limited|plc|company|co\.|bank|holdings|corporation|\(pvt\))", re.I)
 
 
@@ -33,6 +35,10 @@ class Candidate:
     match_score: float = 1.0
     cleaned: bool = False         # amount text was corrected by amounts.py
     notes: List[str] = field(default_factory=list)
+    line_index: int = -1          # line of the label (for row-alignment checks)
+    amount_line: int = -1         # line the amount was taken from
+    realigned: bool = False       # value taken from a neighbouring row (see alignment.py)
+    phrase_words: int = 1         # words in the matched label phrase: 'net salary' (2) is more specific than 'net' (1)
 
 
 @dataclass
@@ -96,7 +102,7 @@ def split_amount(line: Line):
 
 
 def _amount_candidate(field_name, label_toks, amount_toks, score) -> Optional[Candidate]:
-    raw = "".join(t.text for t in amount_toks)
+    raw = " ".join(t.text for t in amount_toks)     # spaces kept: '28 775 29' -> cents rule
     parsed = parse_amount(raw)
     if parsed is None:
         return None
@@ -130,7 +136,10 @@ def find_pay_period(lines: List[Line]) -> Optional[Candidate]:
 def find_issuer(lines: List[Line]) -> Optional[Candidate]:
     """Employer / company name: a line with a company word (Ltd, PVT, PLC, Bank ...) near the top,
     otherwise the first text line. The fallback gets lower confidence."""
-    top = lines[: max(3, len(lines) // 4)]
+    # Lines that are field labels, carry an amount or hold personal key-value data (Name :, NIC ...)
+    # are never the issuer: 'EPF Corporation Contribution 28,775.29' contains 'Corporation' but is a field.
+    top = [ln for ln in lines[: max(3, len(lines) // 4)]
+           if not split_amount(ln)[1] and not match_field(ln.text) and not PERSONAL_FIELD.match(ln.text)]
     for ln in top:
         if ISSUER_HINTS.search(ln.text):
             conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
@@ -155,7 +164,10 @@ def extract_fields(tokens: Sequence) -> Dict[str, Candidate]:
         if c is None:
             return
         old = found.get(c.field)
-        if old is None or (c.match_score, c.ocr_confidence) > (old.match_score, old.ocr_confidence):
+        # A more specific label wins ('Net Salary' over 'Net bonus payment', both containing 'net'),
+        # then the closer match, then OCR confidence.
+        if old is None or (c.match_score + 0.05 * c.phrase_words, c.ocr_confidence) > \
+                (old.match_score + 0.05 * old.phrase_words, old.ocr_confidence):
             found[c.field] = c
 
     for i, ln in enumerate(lines):
@@ -165,21 +177,26 @@ def extract_fields(tokens: Sequence) -> Dict[str, Candidate]:
         m = match_field(" ".join(t.text for t in label_toks))
         if not m:
             continue
-        fname, score, _ = m
+        fname, score, phrase = m
+        words = len(phrase.split())
         if amount_toks:
-            keep(_amount_candidate(fname, label_toks, amount_toks, score))
+            c = _amount_candidate(fname, label_toks, amount_toks, score)
+            if c:
+                c.line_index, c.amount_line, c.phrase_words = i, i, words
+            keep(c)
             continue
-        # Label without a value on its line: take an amount-only line directly below it.
-        lx0, lx1 = label_toks[0].bbox[0], label_toks[-1].bbox[0] + label_toks[-1].bbox[2]
-        for nxt in lines[i + 1: i + 3]:
+        # Label without a value on its line: take an amount-only line directly below it. The amount
+        # may sit under the label or far to the right in an amount column (right-aligned slips).
+        lx0 = label_toks[0].bbox[0]
+        for j, nxt in enumerate(lines[i + 1: i + 3], start=i + 1):
             n_label, n_amount = split_amount(nxt)
             if n_amount and not n_label:
-                ax0 = n_amount[0].bbox[0]
                 ax1 = n_amount[-1].bbox[0] + n_amount[-1].bbox[2]
-                if ax0 <= lx1 + 50 and ax1 >= lx0 - 50 and nxt.top - ln.bottom < 3 * (ln.bottom - ln.top):
+                if ax1 >= lx0 - 50 and nxt.top - ln.bottom < 3 * (ln.bottom - ln.top):
                     c = _amount_candidate(fname, label_toks, n_amount, score)
                     if c:
                         c.notes.append("value found below its label")
+                        c.line_index, c.amount_line, c.phrase_words = i, j, words
                     keep(c)
                     break
 
