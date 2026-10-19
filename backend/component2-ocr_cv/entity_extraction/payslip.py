@@ -46,11 +46,13 @@ def detect_languages(tokens: Sequence, min_words: int = 3, min_conf: float = 0.6
 def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
                     processing_ms: Optional[int] = None,
                     to_original: Optional[Callable[[List[int]], List[int]]] = None,
-                    document_type: str = "payslip") -> Tuple[OCROutput, dict]:
+                    document_type: str = "payslip", candidates: Optional[dict] = None) -> Tuple[OCROutput, dict]:
     """tokens must be in the coordinates of the image OCR ran on (the straightened image), because
     lines are rebuilt from box positions and a tilted photo puts a label and its amount at
-    different heights. `to_original` maps each final bbox back to the uploaded photo."""
-    cands = extract_fields(tokens)
+    different heights. `to_original` maps each final bbox back to the uploaded photo.
+    `candidates` lets multi-engine fusion pass already-chosen field values; the fiscal checks,
+    confidence and ontology steps below are then identical to the single-engine path."""
+    cands = candidates if candidates is not None else extract_fields(tokens)
     amounts = {f: c.value for f, c in cands.items() if isinstance(c.value, float)}
     fiscal: FiscalReport = validate_and_correct(amounts)
 
