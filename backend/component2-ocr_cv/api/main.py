@@ -29,10 +29,13 @@ app = FastAPI(
                 "with per-field confidence and bounding boxes. Part of J26-DS-303.",
 )
 
-LANG_HELP = "Tesseract languages joined with '+', e.g. eng, sin+eng, sin+tam+eng"
+LANG_HELP = ("auto (default: detects which of English/Sinhala/Tamil are on the page) or Tesseract "
+             "languages joined with '+', e.g. eng, sin+eng, sin+tam+eng")
 
 
 def _check_lang(lang: str) -> None:
+    if lang == "auto":
+        return
     try:
         installed = set(available_languages())
     except Exception as e:
@@ -72,7 +75,7 @@ def health() -> dict:
 
 @app.post("/extract", response_model=OCROutput, response_model_exclude_none=True)
 def extract(file: UploadFile = File(..., description="Photo, scan or PDF of a payslip"),
-            lang: str = Query("sin+tam+eng", description=LANG_HELP),
+            lang: str = Query("auto", description=LANG_HELP),
             preprocess: bool = Query(True, description="Turn off only to compare with raw OCR"),
             doc_id: Optional[str] = Query(None, description="Optional id; defaults to the file name"),
             engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> OCROutput:
@@ -81,7 +84,7 @@ def extract(file: UploadFile = File(..., description="Photo, scan or PDF of a pa
 
 
 @app.post("/extract/explain")
-def extract_explain(file: UploadFile = File(...), lang: str = Query("sin+tam+eng", description=LANG_HELP),
+def extract_explain(file: UploadFile = File(...), lang: str = Query("auto", description=LANG_HELP),
                     preprocess: bool = Query(True), doc_id: Optional[str] = Query(None),
                     engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> dict:
     """Same as /extract, plus the explanation: every arithmetic check, every correction, and the
@@ -92,7 +95,7 @@ def extract_explain(file: UploadFile = File(...), lang: str = Query("sin+tam+eng
 
 
 @app.post("/extract/visual", responses={200: {"content": {"image/png": {}}}}, response_class=Response)
-def extract_visual(file: UploadFile = File(...), lang: str = Query("sin+tam+eng", description=LANG_HELP),
+def extract_visual(file: UploadFile = File(...), lang: str = Query("auto", description=LANG_HELP),
                    preprocess: bool = Query(True), doc_id: Optional[str] = Query(None),
                    engine: Engine = Query("tesseract", description=ENGINE_HELP)) -> Response:
     """Returns the uploaded image with a box on every extracted field
