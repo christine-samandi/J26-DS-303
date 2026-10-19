@@ -23,7 +23,8 @@ import itertools
 from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from entity_extraction.extractor import Candidate, extract_fields
+from entity_extraction.alignment import extract_aligned
+from entity_extraction.extractor import Candidate
 from entity_extraction.fiscal import evaluate
 
 AGREE_BOOST = 0.5          # two independent engines agreeing halve the remaining doubt
@@ -158,7 +159,7 @@ def extract_fused(tokens_by_engine: Dict[str, Sequence], doc_id: str, processing
         report["fusion"] = {"note": f"no field fusion for {cls.document_type}; used {lead}"}
         return out, report
 
-    per_engine = {e: extract_fields(t) for e, t in tokens_by_engine.items()}
+    per_engine = {e: extract_aligned(t)[0] for e, t in tokens_by_engine.items()}   # rows re-paired per engine
     fused, decisions = fuse_candidates(per_engine)
     # Sinhala/Tamil detection uses Tesseract's tokens when present (PaddleOCR has no Sinhala model)
     lang_tokens = tokens_by_engine.get("tesseract", tokens_by_engine[lead])
