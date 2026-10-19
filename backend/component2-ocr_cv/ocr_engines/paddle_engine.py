@@ -27,9 +27,11 @@ TESS_TO_PADDLE = {"eng": "en", "tam": "ta"}      # no Sinhala model in PaddleOCR
 
 
 def paddle_lang(tesseract_lang: str) -> str:
-    """'sin+tam+eng' -> 'ta' if Tamil is requested, else 'en' (Paddle runs one language model)."""
+    """Paddle runs ONE recognition model per call. English is preferred whenever it is requested:
+    amounts, labels and most payslip/bill text are printed in English, and Tesseract still covers
+    Sinhala and Tamil words in fusion. The Tamil model is used only for Tamil-only documents."""
     codes = tesseract_lang.split("+")
-    return "ta" if "tam" in codes else "en"
+    return "ta" if ("tam" in codes and "eng" not in codes) else "en"
 
 
 def split_phrase(text: str, score: float, box: Sequence[float]) -> List[Token]:

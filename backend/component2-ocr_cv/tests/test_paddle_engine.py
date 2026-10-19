@@ -13,9 +13,10 @@ COMPONENT = Path(__file__).resolve().parents[1]
 
 
 def test_language_mapping_has_no_sinhala():
-    assert paddle_lang("sin+tam+eng") == "ta"
+    assert paddle_lang("sin+tam+eng") == "en"       # English printed amounts/labels: English model
     assert paddle_lang("sin+eng") == "en"           # Sinhala stays with Tesseract
     assert paddle_lang("eng") == "en"
+    assert paddle_lang("tam") == "ta"               # Tamil-only document
 
 
 def test_phrase_is_split_into_word_tokens():
