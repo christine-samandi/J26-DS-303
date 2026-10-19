@@ -156,6 +156,7 @@ def report(pipeline: PipelineCost, ours=None, llm=None, baseline=None, consisten
         return "\n".join(lines)
     calls = [c for cs in baseline.calls.values() for c in cs]
     ok = [c for c in calls if c.input_tokens]
+    share, compared = consistency
     o, m = _total(ours.strict), _total(llm.strict)
     ol, ml = _total(ours.lenient), _total(llm.lenient)
     sec = sum(c.seconds for c in ok) / len(ok) if ok else 0.0
@@ -163,8 +164,9 @@ def report(pipeline: PipelineCost, ours=None, llm=None, baseline=None, consisten
         "",
         f"PART B  LLM extraction ({baseline.model}), {gold_chunks} gold chunks x "
         f"{len(next(iter(baseline.calls.values()), []))} runs",
-        f"  calls: {len(calls)}, failed: {len(baseline.errors)}, items dropped as invalid: "
-        f"{sum(c.invalid for c in calls)}, entities not found in the text: {invented}",
+        f"  calls: {len(calls)}, answered: {len(ok)}, failed after retries: "
+        f"{len(calls) - len(ok)} (provider errors), entities not found in the text: {invented}",
+        f"  scored on the first answer per chunk; chunks never answered: {baseline.unanswered()}",
         "",
         f"  {'':30} {'spaCy + regex':>15} {'LLM':>15}",
         f"  {'precision (strict)':30} {o.precision:15.3f} {m.precision:15.3f}",
@@ -176,7 +178,8 @@ def report(pipeline: PipelineCost, ours=None, llm=None, baseline=None, consisten
         f"  {'tokens per chunk (in / out)':30} {'0 / 0':>15} "
         f"{(sum(c.input_tokens for c in ok) // max(len(ok), 1))!s:>7} / "
         f"{(sum(c.output_tokens for c in ok) // max(len(ok), 1))!s:<6}",
-        f"  {'same answer on every run':30} {'100%':>15} {consistency:15.0%}",
+        f"  {'same answer on every run':30} {'100%':>15} {share:15.0%}"
+        f"  ({compared} chunks answered twice)",
         "  Note: the extractor was refined on these chunks after its blind first score",
         "  (P 0.97 / R 1.00); the LLM sees them for the first time (zero-shot, same guide).",
     ]
@@ -208,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pause", type=float, default=4.0, help="seconds between LLM calls")
     parser.add_argument("--price-in", type=float, help="USD per million input tokens")
     parser.add_argument("--price-out", type=float, help="USD per million output tokens")
+    parser.add_argument("--rescore", action="store_true", help="rebuild Part B from the saved "
+                        "indexing_cost.json instead of calling the LLM again")  # fmt: skip
     parser.add_argument(
         "--sheet", type=Path, default=COMPONENT_DIR / "ground_truth" / "entity_annotations.xlsx"
     )
@@ -226,41 +231,57 @@ def main(argv: list[str] | None = None) -> int:
     }}  # fmt: skip
     text = report(pipeline)
 
-    if args.llm:
+    saved = None
+    if args.rescore:
+        path = args.out / "indexing_cost.json"
+        saved = json.loads(path.read_text()).get("llm") if path.exists() else None
+        if not saved:
+            print(f"No saved LLM results in {path}. Run with --llm gemini first.")
+            return 1
+    if args.llm or saved:
         from entity_recognition.annotation import read_annotations
         from entity_recognition.evaluate import _total, evaluate
         from evaluation.llm_baseline import (
             DEFAULT_MODEL,
+            Baseline,
             GeminiExtractor,
             consistency,
             not_in_text,
             run_baseline,
         )
 
-        key = os.getenv("GEMINI_API_KEY", "").strip()
-        if not key:
-            print("Part B needs GEMINI_API_KEY in .env (see README).")
-            return 1
-        model = args.model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
         texts, gold = read_annotations(args.sheet)
-        print(f"Part B: {model} on {len(texts)} gold chunks x {args.runs} runs "
-              f"(pause {args.pause:g} s between calls, not counted) ...")  # fmt: skip
-        baseline = run_baseline(texts, GeminiExtractor(key, model), args.runs, args.pause)
+        if saved:
+            baseline = Baseline.from_json(saved)
+            model, runs = baseline.model, saved.get("runs", args.runs)
+            print(f"Part B: rescoring the saved {model} answers (no LLM calls) ...")
+        else:
+            key = os.getenv("GEMINI_API_KEY", "").strip()
+            if not key:
+                print("Part B needs GEMINI_API_KEY in .env (see README).")
+                return 1
+            model, runs = args.model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL), args.runs
+            print(f"Part B: {model} on {len(texts)} gold chunks x {runs} runs "
+                  f"(pause {args.pause:g} s between calls, not counted) ...")  # fmt: skip
+            baseline = run_baseline(texts, GeminiExtractor(key, model), runs, args.pause)
         ours = evaluate(texts, gold)
-        llm = evaluate(texts, gold, lambda cid, _t: baseline.run(0).get(cid, []))
+        first = baseline.first_answer()
+        llm = evaluate(texts, gold, lambda cid, _t: first.get(cid, []))
         cons, invented = consistency(baseline), not_in_text(baseline, texts)
         proj = project(baseline, texts, pipeline, args.price_in, args.price_out)
         text = report(pipeline, ours, llm, baseline, cons, invented, proj, len(texts))
         payload["llm"] = {
             "model": model,
             "gold_chunks": len(texts),
-            "runs": args.runs,
+            "runs": runs,
             "errors": baseline.errors,
             "scores_strict": {"ours": _total(ours.strict).as_dict(),
                               "llm": _total(llm.strict).as_dict()},
             "scores_lenient": {"ours": _total(ours.lenient).as_dict(),
                                "llm": _total(llm.lenient).as_dict()},
-            "consistency": round(cons, 4),
+            "consistency": round(cons[0], 4),
+            "consistency_chunks": cons[1],
+            "unanswered_chunks": baseline.unanswered(),
             "entities_not_in_text": invented,
             "calls": {cid: [vars(c) for c in cs] for cid, cs in baseline.calls.items()},
             "projection": vars(proj),

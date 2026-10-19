@@ -9,7 +9,9 @@ from entity_recognition.evaluate import _total, evaluate  # noqa: E402
 from evaluation.indexing_cost import PipelineCost, Stage, project, report  # noqa: E402
 from evaluation.llm_baseline import (  # noqa: E402
     PROMPT,
+    Baseline,
     Call,
+    QuotaExhausted,
     consistency,
     not_in_text,
     parse_answer,
@@ -72,7 +74,7 @@ def test_llm_is_scored_with_the_same_scorer_as_the_extractor():
     assert (llm.tp, llm.fp, llm.fn) == (5, 1, 1)  # missed the date, invented "Rs. 6"
     ours = _total(evaluate(TEXTS, GOLD).strict)
     assert ours.recall == 1.0  # the extractor finds all six
-    assert consistency(baseline) == 0.5  # C2 changed between runs
+    assert consistency(baseline) == (0.5, 2)  # C2 changed between runs
     assert not_in_text(baseline, TEXTS) == 1  # "Rs. 6" does not occur in the text
 
 
@@ -91,6 +93,49 @@ def test_failed_calls_are_recorded_not_fatal():
 
     baseline = run_baseline(TEXTS, Down(), runs=1, pause_s=0)
     assert len(baseline.errors) == 2 and baseline.run(0) == {"C1": [], "C2": []}
+    assert baseline.unanswered() == 2
+
+
+def test_a_failed_call_is_not_a_different_answer():
+    class Flaky(FakeLLM):
+        def extract(self, text):
+            self.calls += 1
+            if self.calls > 2:  # every second-run call fails
+                raise RuntimeError("503 ServerError")
+            return Call(entities=[("RATE", "6%")], seconds=1.0, input_tokens=100)
+
+    baseline = run_baseline(TEXTS, Flaky(), runs=2, pause_s=0)
+    assert consistency(baseline) == (1.0, 0)  # nothing answered twice: nothing to compare
+    assert baseline.first_answer() == {"C1": [("RATE", "6%")], "C2": [("RATE", "6%")]}
+    assert baseline.unanswered() == 0
+
+
+def test_daily_quota_stops_the_run_without_more_calls():
+    class Quota(FakeLLM):
+        def extract(self, text):
+            self.calls += 1
+            if self.calls > 1:
+                raise QuotaExhausted("daily quota of fake-llm used up")
+            return Call(entities=[("RATE", "6%")], seconds=1.0, input_tokens=100)
+
+    llm = Quota()
+    baseline = run_baseline(TEXTS, llm, runs=2, pause_s=0)
+    assert llm.calls == 2  # stopped at the first quota error, no further calls
+    assert [len(cs) for cs in baseline.calls.values()] == [2, 2]
+    assert len(baseline.errors) == 1 and baseline.unanswered() == 1
+
+
+def test_saved_results_can_be_rescored_without_calling_again():
+    import json
+    from dataclasses import asdict
+
+    baseline = run_baseline(TEXTS, FakeLLM(), runs=2, pause_s=0)
+    saved = json.loads(json.dumps({"model": baseline.model, "errors": [],
+                                   "calls": {cid: [asdict(c) for c in cs]
+                                             for cid, cs in baseline.calls.items()}}))  # fmt: skip
+    again = Baseline.from_json(saved)
+    assert again.first_answer() == baseline.first_answer()
+    assert consistency(again) == consistency(baseline)
 
 
 def _pipeline():
@@ -115,7 +160,7 @@ def test_report_shows_both_sides():
     ours = evaluate(TEXTS, GOLD)
     llm = evaluate(TEXTS, GOLD, lambda cid, _t: baseline.run(0)[cid])
     proj = project(baseline, TEXTS, _pipeline(), None, None)
-    text = report(_pipeline(), ours, llm, baseline, 0.5, 0, proj, len(TEXTS))
+    text = report(_pipeline(), ours, llm, baseline, (0.5, 2), 0, proj, len(TEXTS))
     assert "PART A" in text and "PART B" in text and "PROJECTION" in text
     assert "0.50 ms" in text and "1500 ms" in text and "set --price-in/--price-out" in text
     assert "PART B" not in report(_pipeline())
