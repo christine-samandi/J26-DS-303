@@ -11,6 +11,7 @@ from pydantic import (
 
 from assurance_pipeline.pipeline import (
     assure_citation,
+    assure_combined,
     assure_line_item_total,
     assure_tax_total,
 )
@@ -148,6 +149,39 @@ class CitationCheckRequest(BaseModel):
             raise ValueError("Duplicate source ID detected.")
 
         return sources
+
+
+class CombinedCheckRequest(LineItemCheckRequest):
+    """Request for combined numerical and citation assurance."""
+
+    claims: list[CitationClaimRequest] = Field(min_length=1)
+    sources: list[EvidenceSourceRequest]
+
+    @field_validator("sources")
+    @classmethod
+    def validate_unique_sources(
+        cls,
+        sources: list[EvidenceSourceRequest],
+    ) -> list[EvidenceSourceRequest]:
+        source_ids = [source.source_id for source in sources]
+
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Duplicate source ID detected.")
+
+        return sources
+
+    @field_validator("claims")
+    @classmethod
+    def validate_unique_claims(
+        cls,
+        claims: list[CitationClaimRequest],
+    ) -> list[CitationClaimRequest]:
+        claim_ids = [claim.claim_id for claim in claims]
+
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("Duplicate claim ID detected.")
+
+        return claims
 
 class FindingResponse(BaseModel):
     check_name: str
@@ -288,6 +322,71 @@ def verify_claim_citation(request: CitationCheckRequest):
 
     result = assure_citation(
         claim=claim,
+        sources=sources,
+        regeneration_attempts=request.regeneration_attempts,
+    )
+
+    findings = [
+        FindingResponse(
+            check_name=finding.check_name,
+            passed=finding.passed,
+            message=finding.message,
+            severity=finding.severity.value,
+            error_code=finding.error_code.value,
+            expected_value=(
+                str(finding.expected_value)
+                if finding.expected_value is not None
+                else None
+            ),
+            actual_value=(
+                str(finding.actual_value)
+                if finding.actual_value is not None
+                else None
+            ),
+        )
+        for finding in result.findings
+    ]
+
+    decision = DecisionResponse(
+        action=result.decision.action.value,
+        reason=result.decision.reason,
+        failed_checks=result.decision.failed_checks,
+    )
+
+    return AssuranceResponse(
+        findings=findings,
+        decision=decision,
+    )
+
+
+@app.post(
+    "/assurance/combined-check",
+    response_model=AssuranceResponse,
+)
+def verify_combined_assurance(request: CombinedCheckRequest):
+    """Verify numerical consistency and multiple citations together."""
+
+    claims = [
+        CitationClaim(
+            claim_id=claim.claim_id,
+            source_id=claim.source_id,
+            excerpt=claim.excerpt,
+        )
+        for claim in request.claims
+    ]
+
+    sources = [
+        EvidenceSource(
+            source_id=source.source_id,
+            text=source.text,
+        )
+        for source in request.sources
+    ]
+
+    result = assure_combined(
+        reported_total=request.reported_total,
+        line_items=request.line_items,
+        claims=claims,
         sources=sources,
         regeneration_attempts=request.regeneration_attempts,
     )
