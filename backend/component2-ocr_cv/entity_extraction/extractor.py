@@ -92,6 +92,14 @@ def split_amount(line: Line):
     """Return (label_tokens, amount_tokens): the trailing run of numeric-looking tokens is the
     amount (OCR sometimes splits '150, 000.00' into pieces, so they are joined)."""
     toks = line.tokens
+    # Drop trailing punctuation-only fragments (table rules read as ' | \ ) so they do not hide
+    # the amount: "CLOSING 26 215 08 '" must still give the amount 26 215 08.
+    while toks and not any(ch.isalnum() for ch in toks[-1].text):
+        toks = toks[:-1]
+    # A table rule read as 1-2 letters right after an amount ('26 215 08 if') is noise, not a label.
+    while len(toks) >= 2 and len(toks[-1].text) <= 2 and not looks_numeric(toks[-1].text) \
+            and looks_numeric(toks[-2].text):
+        toks = toks[:-1]
     i = len(toks)
     while i > 0 and looks_numeric(toks[i - 1].text):
         i -= 1

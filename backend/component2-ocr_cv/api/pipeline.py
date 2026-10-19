@@ -69,6 +69,57 @@ def decode_upload(data: bytes, filename: str = "") -> Tuple[np.ndarray, int]:
     return img, 1
 
 
+AUTO = "auto"
+LOW_CONF = 0.5          # a word below this OCR confidence is "doubtful"
+CLEAN_SHARE = 0.15      # English pass with at most 15% doubtful words = an English document
+SCRIPT_MIN_WORDS = 5    # a script is "on the page" only with this many confident words ...
+SCRIPT_MIN_SHARE = 0.10  # ... making up at least this share of all words (stray characters from
+                         # table rules or logos must not switch on Tamil/Sinhala)
+SCRIPTS = {"sin": ("\u0D80", "\u0DFF", "Sinhala"), "tam": ("\u0B80", "\u0BFF", "Tamil")}
+
+
+def script_words(tokens, lo: str, hi: str) -> int:
+    """Confident words (2+ characters) written mostly in the script range [lo, hi]."""
+    n = 0
+    for t in tokens:
+        letters = [ch for ch in t.text if ch.isalpha() or lo <= ch <= hi]
+        if t.confidence >= 0.6 and len(t.text) >= 2 and letters and \
+                sum(lo <= ch <= hi for ch in letters) / len(letters) >= 0.5:
+            n += 1
+    return n
+
+
+def choose_language(img: np.ndarray) -> Tuple[list, str, str]:
+    """Script-aware language selection (lang='auto').
+
+    Why: loading Sinhala and Tamil models on an English page makes Tesseract try Sinhala/Tamil
+    shapes on English text (a real statement's '26 215 08' became '08 08' and a false 'ta' language
+    appeared). Loading only Sinhala on an English+Sinhala payslip avoids Tamil confusion, and so on.
+      1. Read in English. If few words are doubtful, it is an English document: done (fast path).
+      2. Otherwise read with every installed script and count confident words per script.
+      3. Re-read with ONLY the scripts that are really on the page, plus English.
+    Returns (tokens, tesseract language used, reason)."""
+    eng = run_tesseract(img, lang="eng")
+    words = [t for t in eng if len(t.text) >= 2]
+    doubtful = sum(t.confidence < LOW_CONF for t in words) / len(words) if words else 1.0
+    if words and doubtful <= CLEAN_SHARE:
+        return eng, "eng", f"English reading is clean ({doubtful:.0%} doubtful words)"
+    extra = [c for c in ("sin", "tam") if c in available_languages()]
+    if not extra:
+        return eng, "eng", "Sinhala/Tamil language packs are not installed"
+    all_lang = "+".join(extra + ["eng"])
+    mixed = run_tesseract(img, lang=all_lang)
+    total = max(1, sum(len(t.text) >= 2 for t in mixed))
+    counts = {c: script_words(mixed, SCRIPTS[c][0], SCRIPTS[c][1]) for c in extra}
+    chosen = [c for c in extra if counts[c] >= SCRIPT_MIN_WORDS and counts[c] / total >= SCRIPT_MIN_SHARE]
+    if not chosen:
+        found = ", ".join(f"{SCRIPTS[c][2]} {counts[c]}" for c in extra)
+        return eng, "eng", f"no real Sinhala/Tamil text ({found} confident words of {total}); English kept"
+    used = "+".join(chosen + ["eng"])
+    reason = ", ".join(f"{SCRIPTS[c][2]}: {counts[c]} confident words of {total}" for c in chosen)
+    return (mixed if used == all_lang else run_tesseract(img, lang=used)), used, reason
+
+
 def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
     """Run ONE reading engine. lang is Tesseract-style (sin+tam+eng); Paddle maps it to its own model."""
     if engine == "tesseract":
@@ -82,7 +133,7 @@ def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
     raise ValueError(f"unknown engine '{engine}'")
 
 
-def analyse(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preprocessing: bool = True,
+def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing: bool = True,
             engine: str = "tesseract") -> Tuple[OCROutput, dict, Sequence]:
     """The whole pipeline for one image. Returns (contract output, explanation report, tokens used
     for the text). The benchmark uses the tokens for CER/WER; the API only needs the first two."""
@@ -96,27 +147,39 @@ def analyse(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preproc
         page = res.image                      # every engine reads the SAME straightened image,
         to_original = res.to_original_bbox    # so their boxes can be compared and fused
 
+    language = {"requested": lang, "used": lang, "reason": "chosen by the caller"}
+    tess_tokens = None
+    if lang == AUTO and engine in ("tesseract", "fusion"):
+        tess_tokens, used, reason = choose_language(page)
+        language = {"requested": AUTO, "used": used, "reason": reason}
+        lang = used
+    elif lang == AUTO:
+        lang = "eng"
+        language = {"requested": AUTO, "used": "en (PaddleOCR)", "reason": "PaddleOCR reads English/Tamil models only"}
+
     if engine == "fusion":
-        by_engine = {"tesseract": read_tokens(page, "tesseract", lang), "paddle": read_tokens(page, "paddle", lang)}
+        by_engine = {"tesseract": tess_tokens if tess_tokens is not None else read_tokens(page, "tesseract", lang),
+                     "paddle": read_tokens(page, "paddle", lang)}
         out, report = extract_fused(by_engine, doc_id, to_original=to_original)
         tokens = by_engine["tesseract"]
     else:
-        tokens = read_tokens(page, engine, lang)
+        tokens = tess_tokens if tess_tokens is not None else read_tokens(page, engine, lang)
         out, report = extract_document(tokens, doc_id=doc_id, engine=ENGINE_LABELS.get(engine, engine),
                                       to_original=to_original)
     out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
     report["engine"] = engine
+    report["ocr_language"] = language
     return out, report, tokens
 
 
-def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "sin+tam+eng", use_preprocessing: bool = True,
+def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing: bool = True,
                  engine: str = "tesseract") -> Tuple[OCROutput, dict]:
     out, report, _ = analyse(img, doc_id, lang=lang, use_preprocessing=use_preprocessing, engine=engine)
     return out, report
 
 
-def process_upload(data: bytes, filename: str, doc_id: Optional[str] = None, lang: str = "sin+tam+eng",
+def process_upload(data: bytes, filename: str, doc_id: Optional[str] = None, lang: str = "auto",
                    use_preprocessing: bool = True, engine: str = "tesseract") -> PipelineResult:
     img, pages = decode_upload(data, filename)
     doc = doc_id or (filename.rsplit(".", 1)[0] if filename else "upload")
