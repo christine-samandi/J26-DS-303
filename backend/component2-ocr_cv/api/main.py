@@ -62,6 +62,18 @@ def _run(file: UploadFile, lang: str, preprocess: bool, doc_id: Optional[str], e
         raise HTTPException(503, str(e)) from e
 
 
+@app.on_event("startup")
+def _warm_up_paddle() -> None:
+    """Load PaddleOCR in the background when the server starts, so the first fusion/paddle request
+    does not wait for the model to load. Does nothing if PaddleOCR is not installed."""
+    import importlib.util
+    import threading
+    if importlib.util.find_spec("paddleocr") is None:
+        return
+    from ocr_engines.paddle_engine import warm_up
+    threading.Thread(target=warm_up, args=("en",), daemon=True).start()
+
+
 @app.get("/health")
 def health() -> dict:
     """Is the service up, and which OCR languages can it read?"""
