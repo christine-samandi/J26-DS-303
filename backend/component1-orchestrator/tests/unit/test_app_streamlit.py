@@ -125,3 +125,61 @@ def test_no_pii_note_when_no_llm_was_asked(monkeypatch):
     at = calculate(monkeypatch)
     assert not at.exception
     assert pii_notes(at) == []
+
+
+def toggle_labels(at: AppTest) -> list[str]:
+    return [t.label for t in at.toggle]
+
+
+def test_c4_mock_by_default_offers_forced_regenerate(monkeypatch):
+    monkeypatch.delenv("C4_LIVE", raising=False)
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    assert not next(t for t in at.toggle if t.label == "Live C4 assurance").value
+    assert "C4 mock: force one REGENERATE" in toggle_labels(at)
+
+    next(t for t in at.toggle if t.label == "C4 mock: force one REGENERATE").set_value(True)
+    next(b for b in at.button if b.label == "Calculate").click()
+    at.run()
+    assert not at.exception
+    verdicts = next(d.value for d in at.dataframe if "Decision" in d.value.columns)
+    assert list(verdicts["Decision"]) == ["REGENERATE", "PASS"]
+    assert any("scripted" in c.value for c in at.caption)
+
+
+def test_live_c4_unreachable_warns_and_still_shows_the_result(monkeypatch):
+    monkeypatch.setenv("C4_LIVE", "1")
+    monkeypatch.setenv("C4_API_URL", "http://127.0.0.1:9")
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    assert next(t for t in at.toggle if t.label == "Live C4 assurance").value
+    assert "C4 mock: force one REGENERATE" not in toggle_labels(at)
+    assert any(c.value == "C4 API: http://127.0.0.1:9" for c in at.sidebar.caption)
+
+    next(b for b in at.button if b.label == "Calculate").click()
+    at.run()
+    assert not at.exception
+    assert any(w.value.startswith("**Assurance unavailable**") for w in at.warning)
+    assert any("C4 is not reachable" in w.value for w in at.warning)
+    assert any(s.value.startswith("Status: **delivered**") for s in at.success)
+    assert "S3_BAND_1" in set(at.dataframe[0].value["Step"])  # the rest of the page renders
+
+
+def test_live_c4_findings_are_shown_with_c4s_columns(monkeypatch):
+    from test_c4_http_client import FakeC4, answers, c4_answer
+
+    c4 = FakeC4(answers((200, c4_answer("PASS", "all checks passed"))))
+    try:
+        monkeypatch.setenv("C4_LIVE", "1")
+        monkeypatch.setenv("C4_API_URL", c4.url)
+        at = AppTest.from_file(str(APP), default_timeout=60).run()
+        next(b for b in at.button if b.label == "Calculate").click()
+        at.run()
+    finally:
+        c4.close()
+
+    assert not at.exception
+    findings = next(d.value for d in at.dataframe if "check_name" in d.value.columns)
+    assert list(findings.columns) == [
+        "check_name", "passed", "severity", "message", "expected_value", "actual_value"
+    ]  # fmt: skip
+    assert list(findings["check_name"]) == ["line_item_sum"]
+    assert any("/assurance/combined-check` on attempt 1" in c.value for c in at.caption)

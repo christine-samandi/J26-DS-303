@@ -28,6 +28,7 @@ Confidence = Annotated[Decimal, Field(ge=0, le=1)]
 Decision = Literal["PASS", "REGENERATE", "HUMAN_REVIEW"]
 RerunStage = Literal["retrieve", "calculate", "explain"]
 Status = Literal["delivered", "needs_review", "failed"]
+Assurance = Literal["mock", "live", "unavailable"]  # who checked the result, if anyone
 
 MAX_ATTEMPTS = 2  # a trace is regenerated at most once (contracts/README.md)
 
@@ -138,6 +139,8 @@ class OrchestratorResult(_Frozen):
     warnings: tuple[str, ...] = ()
     stages_run: tuple[str, ...] = ()
     pii_redacted: int = 0  # PII values redacted from the explanation prompt; not sent to C4
+    assurance: Assurance = "mock"
+    assurance_note: str = ""  # says what checked the result, or why nothing did
 
 
 class PipelineState(TypedDict, total=False):
@@ -159,6 +162,7 @@ class PipelineState(TypedDict, total=False):
     confidence: ConfidenceBreakdown
     trace: PipelineTrace
     verdicts: tuple[AssuranceVerdict, ...]
+    assurance_error: str  # C4 could not check the latest attempt; not fatal, unlike `error`
     rerun_from: RerunStage
     error: str
     stages_run: tuple[str, ...]

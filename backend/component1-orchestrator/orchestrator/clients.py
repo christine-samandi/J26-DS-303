@@ -24,6 +24,7 @@ from orchestrator.models import AssuranceVerdict, Decision, OcrField, OcrResult,
 MOCK_DIR = Path(__file__).resolve().parent / "mock_data"
 C2_DEFAULT_URL = "http://localhost:8000"
 C3_DEFAULT_URL = "http://localhost:8003"
+C4_DEFAULT_URL = "http://localhost:8004"
 
 
 class ComponentUnavailable(Exception):
@@ -275,3 +276,107 @@ class MockAssuranceClient:
             decision=step,
             reasons=() if step == "PASS" else (f"mock C4 scripted {step}",),
         )
+
+
+C4_DECISIONS = ("PASS", "REGENERATE", "HUMAN_REVIEW")
+
+
+def _money(value: Decimal) -> str:
+    """C4 takes money as decimal strings, never in exponent form."""
+    return f"{value:f}"
+
+
+def c4_payload(trace: PipelineTrace) -> tuple[str, dict]:
+    """The C4 endpoint and body for one trace.
+
+    C4 has no pipeline_trace endpoint yet, so the trace is flattened into what it checks:
+      - line-item sum: S4's total against the band taxes it adds up (its inputs),
+      - citations: one C4 claim per (claim, cited rule), the rule as the source and its C3
+        evidence as both source text and excerpt. That makes the excerpt check pass by
+        construction, so this checks only that every cited rule is a known source.
+    Claims without a citation (S5, S6) and citations of rules without evidence (seed rules
+    when C3 is off) are left out: C4 would read them as missing or unknown sources. With no
+    claim left, only the line-item check is sent.
+    """
+    total = next(s for s in trace.calc_steps if s.step_id == "S4_TOTAL_TAX")
+    # No band reached means the total is 0; C4 needs at least one line item.
+    line_items = [_money(v) for v in total.inputs.values() if v is not None] or ["0"]
+    evidence = {
+        ref.rule_id: ref.evidence
+        for ref in (trace.rules.personal_relief.ref, trace.rules.tax_bands.ref)
+        if ref.evidence and ref.evidence.strip()
+    }
+    claims = [
+        {"claim_id": f"{c.claim_id}/{rule_id}", "source_id": rule_id, "excerpt": evidence[rule_id]}
+        for c in trace.claims
+        for rule_id in c.citation_refs
+        if rule_id in evidence
+    ]
+    body = {
+        "reported_total": _money(total.result),
+        "line_items": line_items,
+        # C1 alone decides whether to regenerate (once at most, see stages.after_assure);
+        # C4 only learns how many times C1 already has.
+        "regeneration_attempts": trace.attempt - 1,
+    }
+    if not claims:
+        return "/assurance/line-item-check", body
+    cited = sorted({c["source_id"] for c in claims})
+    sources = [{"source_id": rule_id, "text": evidence[rule_id]} for rule_id in cited]
+    return "/assurance/combined-check", body | {"claims": claims, "sources": sources}
+
+
+class HttpAssuranceClient:
+    """C4's real assurance service (combined-check / line-item-check, see `c4_payload`).
+
+    C4's answer has no request_id or attempt, so the verdict takes them from the trace.
+    Its failed findings become the verdict's reasons. Keeps the last endpoint, body and
+    answer (`last`) so the UI can show what C4 checked. Standard library only.
+    """
+
+    def __init__(self, base_url: str = C4_DEFAULT_URL, timeout_s: float = 10.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_s = timeout_s
+        self.last: dict | None = None
+
+    def assure(self, trace: PipelineTrace) -> AssuranceVerdict:
+        path, body = c4_payload(trace)
+        req = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        raw = _http("C4", req, self.timeout_s)
+        try:
+            answer = json.loads(raw)
+            decision = answer["decision"]["action"]
+            findings = answer["findings"]
+            reasons = tuple(str(f["message"]) for f in findings if not f["passed"])
+            if decision != "PASS" and not reasons:
+                reasons = (str(answer["decision"]["reason"]),)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ComponentUnavailable(f"C4's answer is not an assurance response: {e}") from e
+        if decision not in C4_DECISIONS:
+            raise ComponentUnavailable(f"C4 answered an unknown decision {decision!r}")
+        self.last = {"endpoint": path, "request": body, "response": answer}
+        return AssuranceVerdict(
+            request_id=trace.request_id,
+            attempt=trace.attempt,
+            decision=decision,
+            reasons=reasons if decision != "PASS" else (),
+        )
+
+
+def _on(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def assurance_client_from_env(env: Mapping[str, str]) -> MockAssuranceClient | HttpAssuranceClient:
+    """C4_LIVE=1 -> the real C4 service at C4_API_URL (default localhost:8004).
+
+    Off by default (unset or anything else) -> the mock, which PASSes.
+    """
+    if _on(env.get("C4_LIVE")):
+        return HttpAssuranceClient(env.get("C4_API_URL", C4_DEFAULT_URL))
+    return MockAssuranceClient()

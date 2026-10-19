@@ -18,12 +18,15 @@ from orchestrator.clients import (  # noqa: E402
     C2_DEFAULT_URL,
     C2_TO_C1_FIELDS,
     C3_DEFAULT_URL,
+    C4_DEFAULT_URL,
     ComponentUnavailable,
+    HttpAssuranceClient,
     HttpOcrClient,
     HttpRetrievalClient,
     MockAssuranceClient,
     MockOcrClient,
     MockRetrievalClient,
+    assurance_client_from_env,
 )
 from orchestrator.graph import run  # noqa: E402
 from orchestrator.llm import explainer_llm_from_env  # noqa: E402
@@ -47,6 +50,15 @@ CHANGED = "background-color: rgba(250, 180, 0, 0.25)"  # readable in light and d
 PAYSLIP_COVERS = {"One month (x 12 for the year)": 1, "Full year (annual summary)": 12}
 UPLOAD_TYPES = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "pdf"]
 STATUS_BOX = {"delivered": st.success, "needs_review": st.warning, "failed": st.error}
+# C4's FindingResponse fields shown in the Assurance panel (component4-assurance/api/main.py)
+C4_FINDING_COLUMNS = [
+    "check_name",
+    "passed",
+    "severity",
+    "message",
+    "expected_value",
+    "actual_value",
+]
 
 
 def load_env() -> dict[str, str]:
@@ -209,6 +221,19 @@ with st.sidebar:
         year = st.selectbox("Year of assessment", MOCK_YEARS)
         st.caption("Mock rules (C1 stand-in for C3)")
 
+    st.header("Assurance (C4)")
+    live_c4 = st.toggle(
+        "Live C4 assurance",
+        value=isinstance(assurance_client_from_env(env_now), HttpAssuranceClient),
+        help="On: C4's service checks the result. Off: a mock that PASSes unless told not to.",
+    )
+    c4_env = {**env_now, "C4_LIVE": "1" if live_c4 else "0"}
+    force_regen = False
+    if live_c4:
+        st.caption(f"C4 API: {c4_env.get('C4_API_URL', C4_DEFAULT_URL)}")
+    else:
+        force_regen = st.toggle("C4 mock: force one REGENERATE", value=False)
+
     st.header("Options")
     use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
     demo_tamper = st.toggle(
@@ -216,7 +241,6 @@ with st.sidebar:
         value=False,
         help="Offline: feeds a deliberately wrong rewrite to the real post-check. No Gemini call.",
     )
-    force_regen = st.toggle("C4 mock: force one REGENERATE", value=False)
     go = st.button("Calculate", type="primary", width="stretch")
 
 if not go:
@@ -245,10 +269,13 @@ if mode.startswith("Upload"):
     docs = (ocr.add(upload.name, upload.getvalue()),)
 
 retrieval = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
+assurance = assurance_client_from_env(c4_env)
+if force_regen:
+    assurance = MockAssuranceClient(["REGENERATE"])
 deps = Deps(  # built fresh each run: the assurance mock consumes its script
     ocr=ocr,
     retrieval=retrieval,
-    assurance=MockAssuranceClient(["REGENERATE"] if force_regen else []),
+    assurance=assurance,
     explainer_llm=llm,
 )
 request = TaxRequest(
@@ -434,6 +461,42 @@ if exp:
             )
             for line in tampered_markdown(llm.last):
                 st.markdown(line)
+
+if result.status != "failed":
+    st.subheader("Assurance")
+    if result.assurance == "unavailable":
+        st.warning(f"**Assurance unavailable** · {result.assurance_note}")
+    if result.verdicts:
+        last = result.verdicts[-1]
+        a1, a2, a3 = st.columns(3)
+        a1.metric("C4 decision", last.decision)
+        a2.metric("Attempt", last.attempt)
+        a3.metric("Source", result.assurance)
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Attempt": v.attempt, "Decision": v.decision, "Reasons": "; ".join(v.reasons)}
+                    for v in result.verdicts
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+    if result.assurance != "unavailable":
+        st.caption(result.assurance_note)
+    checked = getattr(assurance, "last", None)
+    if checked is not None:  # the last answer C4 gave
+        findings = checked["response"].get("findings") or []
+        st.caption(
+            f"Findings from C4 `{checked['endpoint']}` on attempt "
+            f"{checked['request']['regeneration_attempts'] + 1}"
+        )
+        if findings:
+            st.dataframe(
+                pd.DataFrame(findings).reindex(columns=C4_FINDING_COLUMNS),
+                hide_index=True,
+                width="stretch",
+            )
 
 left, right = st.columns(2)
 with left:
