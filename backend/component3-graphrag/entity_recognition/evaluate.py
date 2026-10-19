@@ -24,6 +24,7 @@ import csv
 import json
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -114,14 +115,24 @@ def _overlaps(label: str, gold: str, pred: str) -> bool:
     return bool(a and b) and (a in b or b in a)
 
 
-def evaluate(texts: dict[str, str], gold: dict[str, list[tuple[str, str]]]) -> Result:
+Predict = Callable[[str, str], list[tuple[str, str]]]  # (chunk_id, text) -> [(label, text)]
+
+
+def _ours(chunk_id: str, text: str) -> list[tuple[str, str]]:
+    return [(e.label, e.text) for e in extract_entities(text)]
+
+
+def evaluate(
+    texts: dict[str, str], gold: dict[str, list[tuple[str, str]]], predict: Predict = _ours
+) -> Result:
+    """Score `predict` (by default this extractor; evaluation.llm_baseline passes an LLM)."""
     result = Result(
         strict={label: Tally() for label in LABELS},
         lenient={label: Tally() for label in LABELS},
     )
     for chunk_id, text in texts.items():
         g = gold.get(chunk_id, [])
-        p = [(e.label, e.text) for e in extract_entities(text)]
+        p = predict(chunk_id, text)
         result.chunks += 1
         result.gold += len(g)
         result.predicted += len(p)

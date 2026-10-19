@@ -32,6 +32,9 @@ vector = [
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
 ]
+llm = [
+    "google-genai>=1.0",  # evaluation.indexing_cost --llm gemini (LLM extraction baseline)
+]
 api = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
