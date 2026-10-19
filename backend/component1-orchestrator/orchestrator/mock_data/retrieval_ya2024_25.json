@@ -1,0 +1,182 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "req-mock",
+  "generated_at": "2026-10-15T00:00:00+05:30",
+  "query": {
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "as_of_date": "2024-04-01",
+    "income_types": [
+      "employment"
+    ],
+    "taxpayer_category": "resident_individual",
+    "rule_types": [
+      "relief",
+      "tax_slab"
+    ],
+    "top_k": 5,
+    "include_history": false
+  },
+  "results": [
+    {
+      "rank": 1,
+      "rule_id": "RULE-PERSONAL_RELIEF-V3",
+      "rule_key": "personal_relief",
+      "rule_type": "relief",
+      "title": "Personal relief for resident individuals",
+      "text": "A resident individual is entitled to a personal relief of Rs. 1,200,000 for a year of assessment.",
+      "values": {
+        "amount": {
+          "amount": 1200000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-45-2022",
+        "document_title": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK]",
+        "document_type": "amendment_act",
+        "act_number": "45 of 2022",
+        "section": "36",
+        "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017"
+      },
+      "validity": {
+        "valid_from": "2023-01-01",
+        "valid_to": "2025-03-31",
+        "status": "replaced",
+        "in_force_on_as_of_date": true,
+        "superseded_by": "RULE-PERSONAL_RELIEF-V4",
+        "supersedes": "RULE-PERSONAL_RELIEF-V2",
+        "changed_by_document_id": "DOC-IRA-AMEND-45-2022"
+      },
+      "confidence": {
+        "score": 0.93,
+        "level": "high",
+        "components": {
+          "semantic_similarity": 0.9,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-45-2022-0001"
+        ],
+        "matched_text": "[MOCK verbatim text] ... personal relief of Rs. 1,200,000 ..."
+      }
+    },
+    {
+      "rank": 2,
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V3",
+      "rule_key": "individual_income_tax_slabs",
+      "rule_type": "tax_slab",
+      "title": "Income tax rates for individuals (progressive bands)",
+      "text": "Taxable income of an individual is taxed in progressive bands at the rates listed.",
+      "values": {
+        "bands": [
+          {
+            "order": 1,
+            "lower": 0,
+            "upper": 500000,
+            "rate_percent": 6
+          },
+          {
+            "order": 2,
+            "lower": 500000,
+            "upper": 1000000,
+            "rate_percent": 12
+          },
+          {
+            "order": 3,
+            "lower": 1000000,
+            "upper": 1500000,
+            "rate_percent": 18
+          },
+          {
+            "order": 4,
+            "lower": 1500000,
+            "upper": 2000000,
+            "rate_percent": 24
+          },
+          {
+            "order": 5,
+            "lower": 2000000,
+            "upper": 2500000,
+            "rate_percent": 30
+          },
+          {
+            "order": 6,
+            "lower": 2500000,
+            "upper": null,
+            "rate_percent": 36
+          }
+        ]
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-45-2022",
+        "document_title": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK]",
+        "document_type": "amendment_act",
+        "act_number": "45 of 2022",
+        "schedule": "First Schedule",
+        "paragraph": "1(1B)(b) and 1(1C)",
+        "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017"
+      },
+      "validity": {
+        "valid_from": "2023-01-01",
+        "valid_to": "2025-03-31",
+        "status": "replaced",
+        "in_force_on_as_of_date": true,
+        "superseded_by": "RULE-INDIVIDUAL_SLABS-V4",
+        "supersedes": "RULE-INDIVIDUAL_SLABS-V2",
+        "changed_by_document_id": "DOC-IRA-AMEND-45-2022"
+      },
+      "confidence": {
+        "score": 0.9,
+        "level": "high",
+        "components": {
+          "semantic_similarity": 0.9,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.95,
+          "temporal_match": 1.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-45-2022-0002"
+        ],
+        "matched_text": "[MOCK verbatim text] ... on the first Rs. 500,000 ... at 6 per cent ..."
+      }
+    }
+  ],
+  "warnings": [],
+  "metadata": {
+    "retrieval_mode": "mock",
+    "latency_ms": 0,
+    "corpus_version": "c1-mock-2026-10-15",
+    "embedding_model": "none (mock)",
+    "candidates_considered": 2,
+    "confidence_method": "mock"
+  }
+}

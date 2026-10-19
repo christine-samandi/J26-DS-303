@@ -1,0 +1,47 @@
+{
+  "scenario_id": "GS-013",
+  "title": "YA 2024/25: GS-010's income under the previous law, well into the 36% band, APIT underpaid",
+  "tags": ["employment_income", "band_6", "high_income", "payable", "ya_2024_25", "law_change"],
+  "year_of_assessment": "2024/25",
+  "input": {
+    "employment_income": 12000000,
+    "apit_paid": 3000000
+  },
+  "expected": {
+    "taxable_income": 10800000,
+    "total_tax": 3438000,
+    "tax_payable": 438000,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1200000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 10800000, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 30000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_2", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_3", "result": 90000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_4", "result": 120000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_5", "result": 150000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_6", "result": 2988000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 3438000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 3000000, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 438000, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,200,000",
+    "Taxable income = 12,000,000 - 1,200,000 = 10,800,000",
+    "Band 1: first 500,000 x 6% = 30,000",
+    "Band 2: next 500,000 x 12% = 60,000",
+    "Band 3: next 500,000 x 18% = 90,000",
+    "Band 4: next 500,000 x 24% = 120,000",
+    "Band 5: next 500,000 x 30% = 150,000",
+    "Band 6: remaining 8,300,000 (2,500,000 to 10,800,000) x 36% = 2,988,000",
+    "Total tax = 30,000 + 60,000 + 90,000 + 120,000 + 150,000 + 2,988,000 = 3,438,000",
+    "APIT credit = 3,000,000",
+    "Tax payable = 3,438,000 - 3,000,000 = 438,000"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-20"}],
+    "notes": "Drafted from the YA 2024/25 seed rules (C3 ground truth V3/B3); hand-checked. Same inputs as GS-010 (YA 2025/26: 3,192,000)."
+  }
+}

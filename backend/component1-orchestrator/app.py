@@ -36,8 +36,13 @@ PAYSLIPS = {
     "Refund case": "payslip_refund",
     "High income (all 5 bands)": "payslip_high_income",
 }
-# YAs the live C3 graph can answer (the mock only has 2025/26)
+# YAs the live C3 graph can answer, and those C1's mock C3 has a file for
 LIVE_YEARS = [f"{y}/{(y + 1) % 100:02d}" for y in range(2026, 2018, -1)]  # 2026/27 .. 2019/20
+MOCK_YEARS = ["2025/26", "2024/25"]
+# "Compare tax years": before and after Act No. 2 of 2025 (relief and bands from 1 April 2025)
+COMPARE_YEARS = ("2024/25", "2025/26")
+SAME = "same"
+CHANGED = "background-color: rgba(250, 180, 0, 0.25)"  # readable in light and dark theme
 # How much of the year one uploaded payslip covers -> months_covered for HttpOcrClient
 PAYSLIP_COVERS = {"One month (x 12 for the year)": 1, "Full year (annual summary)": 12}
 UPLOAD_TYPES = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "pdf"]
@@ -121,6 +126,37 @@ def step_law(step, refs: dict) -> tuple[str, str]:
     return source, evidence
 
 
+def compare_rows(by_year: dict) -> list[dict]:
+    """Two runs side by side (earlier YA first): figures, the Act each cites, and the change."""
+    (old_ya, old), (new_ya, new) = by_year.items()
+    rows = []
+
+    def row(label: str, a, b, change: str) -> None:
+        rows.append({"": label, f"YA {old_ya}": a, f"YA {new_ya}": b, "Change": change})
+
+    def money(result, get):
+        return get(result) if result.calc else None
+
+    for label, get in (
+        ("Personal relief", lambda r: r.rules.personal_relief.amount),
+        ("Taxable income", lambda r: r.calc.taxable_income),
+        ("Total tax", lambda r: r.calc.total_tax),
+        ("Tax payable", lambda r: r.calc.tax_payable),
+        ("Refund", lambda r: r.calc.refund),
+    ):
+        a, b = money(old, get), money(new, get)
+        if a is None or b is None:
+            change = NO_RULE
+        else:
+            change = SAME if a == b else f"{b - a:+,.2f}"
+        row(label, NO_RULE if a is None else rs(a), NO_RULE if b is None else rs(b), change)
+
+    for label, rule in (("Relief cites", "personal_relief"), ("Bands cite", "tax_bands")):
+        a, b = (getattr(r.rules, rule).ref.citation if r.rules else NO_RULE for r in (old, new))
+        row(label, a, b, SAME if a == b else "changed")
+    return rows
+
+
 def tampered_markdown(t: Tampering) -> list[str]:
     """The rejected rewrite, one line per step, with the changed figure and citation marked."""
     out = []
@@ -170,8 +206,8 @@ with st.sidebar:
         st.caption(f"C3 API: {c3_url}")
         year = st.selectbox("Year of assessment", LIVE_YEARS)
     else:
-        year = "2025/26"
-        st.caption("Mock rules · YA 2025/26 only")
+        year = st.selectbox("Year of assessment", MOCK_YEARS)
+        st.caption("Mock rules (C1 stand-in for C3)")
 
     st.header("Options")
     use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
@@ -283,6 +319,37 @@ if calc:
                 st.caption("Chunks: " + ", ".join(ref.evidence_chunk_ids))
             else:
                 st.caption("Seed rule: no source excerpt")
+
+    with st.expander("Compare tax years"):
+        by_year = {}
+        for ya in COMPARE_YEARS:
+            # same figures as above, no Gemini, C4 mock passes: only the law differs
+            retrieval_ya = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
+            deps_ya = Deps(MockOcrClient(), retrieval_ya, MockAssuranceClient())
+            by_year[ya] = run(
+                TaxRequest(
+                    request_id=f"req-{random.randint(1, 9999):04d}",
+                    year_of_assessment=ya,
+                    employment_income=calc.employment_income,
+                    apit_paid=calc.apit_paid,
+                ),
+                deps_ya,
+            )
+        st.caption(
+            f"Same income ({rs(calc.employment_income)}) and APIT ({rs(calc.apit_paid)}), "
+            f"each year under the law in force on 1 April of that year "
+            f"({'live C3' if live_c3 else 'C1 mock C3'}). Highlighted rows changed."
+        )
+        st.dataframe(
+            pd.DataFrame(compare_rows(by_year)).style.apply(
+                lambda row: [CHANGED if row["Change"] != SAME else "" for _ in row], axis=1
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        for ya, r in by_year.items():
+            if r.calc is None:
+                st.error(f"YA {ya}: {'; '.join(r.review_reasons) or r.status}")
 
 read = getattr(ocr, "last", None)
 if read is not None:

@@ -156,3 +156,39 @@ def test_live_c3_citations_are_shown_as_c3_gave_them_with_no_mock_marker(fake_c3
         "[C1 MOCK]" in r.citation
         for r in (mock.rules.personal_relief.ref, mock.rules.tax_bands.ref)
     )
+
+
+# --- live C3, YA 2024/25: cross-checked against rules/ya_2024_25.yaml ----------------------
+
+ANSWER_2024_25 = json.loads((MOCK_DIR / "retrieval_ya2024_25.json").read_text(encoding="utf-8"))
+
+
+def _run_2024_25(c3):
+    request = TaxRequest(request_id="req-0043", year_of_assessment="2024/25",
+                         employment_income=3000000, apit_paid=50000)  # fmt: skip
+    return run(request, Deps(MockOcrClient(), HttpRetrievalClient(c3.url), MockAssuranceClient()))
+
+
+def test_live_c3_for_2024_25_is_cross_checked_against_its_seed(fake_c3):
+    c3 = fake_c3(
+        lambda body: (200, json.dumps(ANSWER_2024_25 | {"request_id": body["request_id"]}).encode())
+    )
+    result = _run_2024_25(c3)
+    assert c3.received[0][1]["as_of_date"] == "2024-04-01"
+    assert result.status == "delivered" and result.calc.total_tax == 252000
+    assert result.conflicts == ()
+    assert not [w for w in result.warnings if "not cross-checked" in w]
+
+
+def test_live_c3_giving_2025_26_values_for_2024_25_is_a_conflict(fake_c3):
+    """C3 dates the rules right but returns the wrong year's values: C1 must not trust it."""
+    wrong = json.loads(json.dumps(ANSWER_2024_25))
+    relief, slabs = wrong["results"]
+    relief["values"] = ANSWER["results"][0]["values"]  # 1,800,000
+    slabs["values"] = ANSWER["results"][1]["values"]  # five 2025/26 bands
+    result = _run_2024_25(
+        fake_c3(lambda body: (200, json.dumps(wrong | {"request_id": body["request_id"]}).encode()))
+    )
+    assert result.status == "needs_review"
+    assert any("personal relief: seed 1200000" in c for c in result.conflicts)
+    assert any("seed has 6 bands" in c for c in result.conflicts)

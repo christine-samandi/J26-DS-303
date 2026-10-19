@@ -61,3 +61,30 @@ def test_steps_table_shows_each_steps_law_and_evidence():
     assert any("personal relief of Rs. 1,800,000" in t for t in full)
     sources = [m.value for m in at.markdown if "Fifth Schedule para 2(a)" in m.value]
     assert any("1,800,000" in s for s in sources)
+
+
+def test_compare_tax_years_shows_both_laws_and_the_change():
+    at = AppTest.from_file(str(APP), default_timeout=60).run()
+    next(b for b in at.button if b.label == "Calculate").click()  # 3,000,000 income, 50,000 APIT
+    at.run()
+
+    assert not at.exception
+    (table,) = [d.value for d in at.dataframe if "Change" in d.value.columns]
+    table = table.set_index("")
+    assert list(table.columns) == ["YA 2024/25", "YA 2025/26", "Change"]
+    assert table.loc["Personal relief"].tolist() == [
+        "Rs 1,200,000.00",
+        "Rs 1,800,000.00",
+        "+600,000.00",
+    ]
+    assert table.loc["Taxable income"].tolist() == [
+        "Rs 1,800,000.00",
+        "Rs 1,200,000.00",
+        "-600,000.00",
+    ]
+    assert table.loc["Total tax"].tolist() == ["Rs 252,000.00", "Rs 96,000.00", "-156,000.00"]
+    assert table.loc["Tax payable"].tolist() == ["Rs 202,000.00", "Rs 46,000.00", "-156,000.00"]
+    assert table.loc["Refund", "Change"] == "same"
+    assert "Act No. 45 of 2022" in table.loc["Relief cites", "YA 2024/25"]
+    assert "Act No. 2 of 2025" in table.loc["Relief cites", "YA 2025/26"]
+    assert table.loc["Bands cite", "Change"] == "changed"

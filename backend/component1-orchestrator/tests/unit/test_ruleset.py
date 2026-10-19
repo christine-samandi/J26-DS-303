@@ -9,7 +9,7 @@ import yaml
 from pydantic import ValidationError
 
 from tax_calculation_agent import ruleset
-from tax_calculation_agent.ruleset import RuleSetError, load_seed_rules, ya_period
+from tax_calculation_agent.ruleset import RuleSetError, load_seed_rules, mid_year_changes, ya_period
 
 YA = "2025/26"
 
@@ -52,6 +52,23 @@ def test_loads_ya_2025_26():
         (Decimal(2000000), Decimal(2500000), Decimal(30)),
         (Decimal(2500000), None, Decimal(36)),
     ]
+
+
+def test_loads_ya_2024_25():
+    rs = load_seed_rules("2024/25")
+    assert (rs.period_start, rs.period_end) == (date(2024, 4, 1), date(2025, 3, 31))
+    assert rs.personal_relief.amount == Decimal("1200000")
+    assert [(b.lower, b.upper, b.rate_percent) for b in rs.tax_bands.bands] == [
+        (Decimal(0), Decimal(500000), Decimal(6)),
+        (Decimal(500000), Decimal(1000000), Decimal(12)),
+        (Decimal(1000000), Decimal(1500000), Decimal(18)),
+        (Decimal(1500000), Decimal(2000000), Decimal(24)),
+        (Decimal(2000000), Decimal(2500000), Decimal(30)),
+        (Decimal(2500000), None, Decimal(36)),
+    ]
+    assert "Act No. 45 of 2022, s.36(2)(a)" in rs.personal_relief.ref.citation
+    assert "Act No. 45 of 2022, s.33(1)" in rs.tax_bands.ref.citation
+    assert mid_year_changes(rs) == []  # both rules end on 2025-03-31, the last day of the YA
 
 
 def test_all_numbers_are_decimal():

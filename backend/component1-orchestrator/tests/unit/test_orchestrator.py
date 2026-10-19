@@ -2,13 +2,20 @@
 
 import ast
 import json
+from datetime import date
 from decimal import Decimal as D
 from pathlib import Path
 
 import pytest
 
 import orchestrator
-from orchestrator.clients import MOCK_DIR, MockAssuranceClient, MockOcrClient, MockRetrievalClient
+from orchestrator.clients import (
+    MOCK_DIR,
+    MockAssuranceClient,
+    MockOcrClient,
+    MockRetrievalClient,
+    mock_retrieval_file,
+)
 from orchestrator.confidence import c1_confidence
 from orchestrator.graph import build_graph, run
 from orchestrator.models import AssuranceVerdict, FailedClaim, TaxRequest
@@ -307,3 +314,43 @@ def test_without_an_explainer_the_trace_has_no_llm_calls():
     run(typed(), d)
     assert d.assurance.traces[0].llm_calls == ()
     assert not d.assurance.traces[0].explanation.used_fallback
+
+
+# --- C1 mock C3 per year of assessment ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("day", "name"),
+    [
+        (date(2024, 4, 1), "retrieval_ya2024_25.json"),
+        (date(2025, 3, 31), "retrieval_ya2024_25.json"),
+        (date(2025, 4, 1), "retrieval_ya2025_26.json"),
+    ],
+)
+def test_mock_c3_file_is_chosen_by_year_of_assessment(day, name):
+    assert mock_retrieval_file(day) == MOCK_DIR / name
+
+
+def test_ya_2024_25_uses_that_years_law_and_matches_its_seed():
+    """GS-012's inputs: the mock C3 answer for 2024/25 gives last year's tax, cross-checked."""
+    result = run(typed(year_of_assessment="2024/25"), Deps(
+        MockOcrClient(), MockRetrievalClient(), MockAssuranceClient()
+    ))  # fmt: skip
+    assert result.status == "delivered"
+    assert (result.calc.taxable_income, result.calc.total_tax, result.calc.tax_payable) == (
+        D(1800000),
+        D(252000),
+        D(202000),
+    )
+    assert result.conflicts == ()
+    assert not [w for w in result.warnings if "not cross-checked" in w]
+    assert "Act No. 45 of 2022 [C1 MOCK], s.36(2)(a)" in result.rules.personal_relief.ref.citation
+    assert "Act No. 45 of 2022 [C1 MOCK], s.33(1)" in result.rules.tax_bands.ref.citation
+
+
+def test_year_without_a_mock_file_fails_with_the_reason():
+    result = run(typed(year_of_assessment="2023/24"), Deps(
+        MockOcrClient(), MockRetrievalClient(), MockAssuranceClient()
+    ))  # fmt: skip
+    assert result.status == "failed" and result.calc is None
+    assert "C1 mock C3 has no rules for 2023-04-01" in result.review_reasons[0]
