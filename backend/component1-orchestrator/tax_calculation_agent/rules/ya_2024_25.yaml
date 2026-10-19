@@ -1,0 +1,68 @@
+# Seed rules — Year of Assessment 2024/25 (1 April 2024 – 31 March 2025)
+#
+# Used to (a) run the engine before C3 is live and (b) cross-check C3's values.
+# If C3 and this file disagree, C1 flags a conflict — it never silently picks one.
+#
+# Field names follow the C3 retrieval contract (j26_contracts.retrieval):
+#   rule_key   -> RetrievedRule.rule_key, used to match against C3 results
+#   values     -> RuleValues (amount / bands), money in LKR, rates in percent
+#   validity   -> Validity.valid_from / valid_to
+#
+# Values and provisions are from C3's hand-verified ground truth
+# (backend/component3-graphrag/ground_truth/: personal relief V3, tax bands B3).
+# Both rules applied from 1 January 2023 until 31 March 2025, so they cover this whole YA.
+
+schema: c1-seed-rules/1
+year_of_assessment: "2024/25"
+period:
+  start: 2024-04-01
+  end: 2025-03-31
+
+sources:
+  - id: SRC-IRA-AMEND-45-2022
+    title: Inland Revenue (Amendment) Act No. 45 of 2022
+    note: Certified 19 December 2022
+
+rules:
+  - rule_id: SEED-PERSONAL_RELIEF-YA2024_25
+    rule_key: personal_relief
+    rule_type: relief
+    title: Personal relief for resident individuals (and non-resident citizens)
+    values:
+      amount:
+        amount: 1200000
+        currency: LKR
+        period: year_of_assessment
+    applies_to:
+      taxpayer_categories: [resident_individual]
+    validity:
+      valid_from: 2023-01-01
+      valid_to: 2025-03-31
+    source:
+      source_ids: [SRC-IRA-AMEND-45-2022]
+      section: "36"
+      citation: Inland Revenue (Amendment) Act No. 45 of 2022, s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017
+
+  - rule_id: SEED-INDIVIDUAL_SLABS-YA2024_25
+    rule_key: individual_income_tax_slabs
+    rule_type: tax_slab
+    title: Income tax rates for individuals (progressive bands)
+    values:
+      # lower/upper are cumulative taxable income; upper: null = no upper limit
+      bands:
+        - {order: 1, lower: 0, upper: 500000, rate_percent: 6}
+        - {order: 2, lower: 500000, upper: 1000000, rate_percent: 12}
+        - {order: 3, lower: 1000000, upper: 1500000, rate_percent: 18}
+        - {order: 4, lower: 1500000, upper: 2000000, rate_percent: 24}
+        - {order: 5, lower: 2000000, upper: 2500000, rate_percent: 30}
+        - {order: 6, lower: 2500000, upper: null, rate_percent: 36}
+    applies_to:
+      taxpayer_categories: [resident_individual]
+    validity:
+      valid_from: 2023-01-01
+      valid_to: 2025-03-31
+    source:
+      source_ids: [SRC-IRA-AMEND-45-2022]
+      schedule: First Schedule
+      paragraph: 1(1B)(b) and 1(1C)
+      citation: Inland Revenue (Amendment) Act No. 45 of 2022, s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017

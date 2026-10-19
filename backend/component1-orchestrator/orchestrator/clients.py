@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
@@ -66,16 +67,30 @@ class MockOcrClient:
         return OcrResult.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-class MockRetrievalClient:
-    """Answers every query with one fixed RetrievalOutput, echoing the caller's request_id."""
+def mock_retrieval_file(day: date) -> Path:
+    """C1's mock C3 answer for the YA (1 April – 31 March) that contains `day`."""
+    start = day.year if day.month >= 4 else day.year - 1
+    return MOCK_DIR / f"retrieval_ya{start}_{(start + 1) % 100:02d}.json"
 
-    def __init__(self, path: Path = MOCK_DIR / "retrieval_ya2025_26.json") -> None:
+
+class MockRetrievalClient:
+    """Answers from `mock_data/retrieval_yaYYYY_YY.json` for the YA containing the query's
+    as_of_date (C1 queries with the YA start), echoing the caller's request_id. With `path`,
+    every query gets that one file."""
+
+    def __init__(self, path: Path | None = None) -> None:
         self.path = path
         self.requests: list[RetrievalRequest] = []
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalOutput:
         self.requests.append(request)
-        data = json.loads(self.path.read_text(encoding="utf-8"))
+        path = self.path or mock_retrieval_file(request.as_of_date)
+        if not path.is_file():
+            raise ComponentUnavailable(
+                f"C1 mock C3 has no rules for {request.as_of_date} ({path.name}); "
+                "turn on live C3 for this year"
+            )
+        data = json.loads(path.read_text(encoding="utf-8"))
         data["request_id"] = request.request_id
         return RetrievalOutput.model_validate(data)
 

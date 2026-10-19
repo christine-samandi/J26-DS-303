@@ -1,0 +1,43 @@
+{
+  "scenario_id": "GS-012",
+  "title": "YA 2024/25: GS-001's income under the previous law, reaching the 24% band, APIT underpaid",
+  "tags": ["employment_income", "band_4", "payable", "ya_2024_25", "law_change"],
+  "year_of_assessment": "2024/25",
+  "input": {
+    "employment_income": 3000000,
+    "apit_paid": 50000
+  },
+  "expected": {
+    "taxable_income": 1800000,
+    "total_tax": 252000,
+    "tax_payable": 202000,
+    "refund": 0,
+    "steps": [
+      {"step_id": "S1_RELIEF", "result": 1200000, "cites": ["personal_relief"]},
+      {"step_id": "S2_TAXABLE_INCOME", "result": 1800000, "cites": ["personal_relief"]},
+      {"step_id": "S3_BAND_1", "result": 30000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_2", "result": 60000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_3", "result": 90000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S3_BAND_4", "result": 72000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S4_TOTAL_TAX", "result": 252000, "cites": ["individual_income_tax_slabs"]},
+      {"step_id": "S5_APIT_CREDIT", "result": 50000, "cites": []},
+      {"step_id": "S6_PAYABLE", "result": 202000, "cites": []}
+    ]
+  },
+  "hand_calculation": [
+    "Personal relief = 1,200,000",
+    "Taxable income = 3,000,000 - 1,200,000 = 1,800,000",
+    "Band 1: first 500,000 x 6% = 30,000",
+    "Band 2: next 500,000 (500,000 to 1,000,000) x 12% = 60,000",
+    "Band 3: next 500,000 (1,000,000 to 1,500,000) x 18% = 90,000",
+    "Band 4: next 300,000 (1,500,000 to 1,800,000) x 24% = 72,000",
+    "Total tax = 30,000 + 60,000 + 90,000 + 72,000 = 252,000",
+    "APIT credit = 50,000",
+    "Tax payable = 252,000 - 50,000 = 202,000"
+  ],
+  "verification": {
+    "status": "verified",
+    "verified_by": [{"name": "Christine Fernando", "date": "2026-10-20"}],
+    "notes": "Drafted from the YA 2024/25 seed rules (C3 ground truth V3/B3); hand-checked. Same inputs as GS-001 (YA 2025/26: 96,000)."
+  }
+}
