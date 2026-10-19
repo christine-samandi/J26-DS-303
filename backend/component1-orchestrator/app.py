@@ -15,7 +15,11 @@ sys.path.insert(0, str(HERE))
 from explanation_agent.badge import explanation_badge  # noqa: E402
 from explanation_agent.demo_tamper import TamperedRewriteLLM, Tampering  # noqa: E402
 from orchestrator.clients import (  # noqa: E402
+    C2_DEFAULT_URL,
+    C2_TO_C1_FIELDS,
     C3_DEFAULT_URL,
+    ComponentUnavailable,
+    HttpOcrClient,
     HttpRetrievalClient,
     MockAssuranceClient,
     MockOcrClient,
@@ -33,7 +37,10 @@ PAYSLIPS = {
     "High income (all 5 bands)": "payslip_high_income",
 }
 # YAs the live C3 graph can answer (the mock only has 2025/26)
-LIVE_YEARS = ["2025/26", "2024/25", "2023/24", "2022/23", "2021/22", "2020/21", "2019/20"]
+LIVE_YEARS = [f"{y}/{(y + 1) % 100:02d}" for y in range(2026, 2018, -1)]  # 2026/27 .. 2019/20
+# How much of the year one uploaded payslip covers -> months_covered for HttpOcrClient
+PAYSLIP_COVERS = {"One month (x 12 for the year)": 1, "Full year (annual summary)": 12}
+UPLOAD_TYPES = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "pdf"]
 STATUS_BOX = {"delivered": st.success, "needs_review": st.warning, "failed": st.error}
 
 
@@ -96,17 +103,24 @@ st.caption("C1 demo · the engine does the math, the LLM only rephrases · law f
 
 with st.sidebar:
     st.header("Input")
-    mode = st.radio("Source", ["Type amounts", "Mock payslip"])
+    mode = st.radio("Source", ["Type amounts", "Mock payslip", "Upload payslip (live C2 OCR)"])
+    env_now = load_env()
     income = apit = None
     docs: tuple[str, ...] = ()
+    upload = None
+    c2_url = env_now.get("C2_API_URL", C2_DEFAULT_URL)
     if mode == "Type amounts":
         income = to_decimal(st.text_input("Employment income (Rs)", "3000000"), "Income")
         apit = to_decimal(st.text_input("APIT already paid (Rs)", "50000"), "APIT")
-    else:
+    elif mode == "Mock payslip":
         docs = (PAYSLIPS[st.selectbox("Payslip", list(PAYSLIPS))],)
+    else:
+        upload = st.file_uploader("Payslip photo, scan or PDF", type=UPLOAD_TYPES)
+        covers = st.selectbox("The payslip covers", list(PAYSLIP_COVERS))
+        show_boxes = st.toggle("Show where C2 read each value", value=True)
+        st.caption(f"C2 API: {c2_url}")
 
     st.header("Law (C3)")
-    env_now = load_env()
     live_c3 = st.toggle(
         "Live C3 GraphRAG",
         value=env_now.get("C1_RETRIEVAL", "mock").strip().lower() == "http",
@@ -147,9 +161,17 @@ elif use_gemini:
         st.error(str(e))
         st.stop()
 
+ocr = MockOcrClient()
+if mode.startswith("Upload"):
+    if upload is None:
+        st.error("Upload a payslip first")
+        st.stop()
+    ocr = HttpOcrClient(c2_url, months_covered=PAYSLIP_COVERS[covers])
+    docs = (ocr.add(upload.name, upload.getvalue()),)
+
 retrieval = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
 deps = Deps(  # built fresh each run: the assurance mock consumes its script
-    ocr=MockOcrClient(),
+    ocr=ocr,
     retrieval=retrieval,
     assurance=MockAssuranceClient(["REGENERATE"] if force_regen else []),
     explainer_llm=llm,
@@ -204,6 +226,42 @@ if calc:
         hide_index=True,
         width="stretch",
     )
+
+read = getattr(ocr, "last", None)
+if read is not None:
+    st.subheader(f"Document read by C2 OCR · {read.get('doc_id')} ({read.get('document_type')})")
+    left_doc, right_doc = st.columns([3, 2]) if show_boxes else (st.container(), None)
+    with left_doc:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Field": f["field_name"],
+                        "Value": f"{f['value']:,.2f}"
+                        if isinstance(f["value"], (int, float))
+                        else str(f["value"]),
+                        "Confidence": f"{f['confidence']:.3f}",
+                        "Needs review": "yes" if f["needs_review"] else "",
+                        "Used by C1 as": C2_TO_C1_FIELDS.get(f["field_name"], ""),
+                    }
+                    for f in read["extracted_fields"]
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.caption(
+            f"C2 overall confidence {read.get('overall_confidence')} · "
+            f"needs review: {'yes' if read.get('needs_review') else 'no'}"
+        )
+        for note in ocr.notes:
+            st.info(f"Annualised: {note}")
+    if right_doc is not None:
+        with right_doc:
+            try:
+                st.image(ocr.visual(docs[0]), caption="Green = trusted, orange = needs review")
+            except ComponentUnavailable as e:
+                st.caption(f"Boxes not available: {e}")
 
 law = getattr(retrieval, "last", None)
 if law is not None:

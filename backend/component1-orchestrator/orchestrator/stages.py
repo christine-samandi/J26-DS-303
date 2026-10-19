@@ -79,9 +79,12 @@ Update = dict  # the state keys a stage sets
 
 def extract(state: PipelineState, deps: Deps) -> Update:
     request = state["request"]
-    return {
-        "ocr_results": tuple(deps.ocr.extract(request.request_id, d) for d in request.documents)
-    }
+    try:
+        return {
+            "ocr_results": tuple(deps.ocr.extract(request.request_id, d) for d in request.documents)
+        }
+    except ComponentUnavailable as e:
+        raise StageError(str(e)) from e
 
 
 def normalise(state: PipelineState, deps: Deps) -> Update:
