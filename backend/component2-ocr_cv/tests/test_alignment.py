@@ -84,3 +84,17 @@ def test_epf_labels_from_real_slip():
 def test_issuer_is_never_a_field_or_personal_line():
     rows = [("Name : Sample Person", ""), ("EPF Corporation Contribution", "2,000.00"), ("Gross Salary", "50,000.00")]
     assert "issuer" not in extract_fields(page(rows))
+
+
+def test_shift_does_not_cross_a_verified_field():
+    # Every row has label + amount (like the real Sinhala payslip): gross is verified in place and
+    # must not be shifted along with the deduction block below it.
+    rows = [("SAMPLE TRADING (PVT) LTD", ""), ("Consolidated Salary", "100,000.00"), ("Fuel Allowance", "20,000.00"),
+            ("TOTAL EARNINGS", "120,000.00"), ("Loan Recovery", "10.00"), ("Welfare Scheme", "5,000.00"),
+            ("Total Deductions", "1,000.00"), ("Net Salary", "8,500.00"), ("Stamp Duty", "111,500.00"),
+            ("Salary to Bank", "25.00")]
+    out, report = extract_document(page(rows), doc_id="FAKE2")
+    by = {f.field_name: f.value for f in out.extracted_fields}
+    assert by["gross_income"] == 120000.0
+    assert by["total_deductions"] == 8500.0 and by["net_amount"] == 111500.0
+    assert "gross_income" not in report["alignment"]["propagated"]

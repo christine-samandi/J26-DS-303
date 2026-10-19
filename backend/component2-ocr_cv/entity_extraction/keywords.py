@@ -22,6 +22,7 @@ HELPER_FIELDS = {"basic_salary", "allowances"}
 FIELD_LABELS: Dict[str, List[str]] = {
     "gross_income": [
         "gross salary", "gross pay", "gross earnings", "gross income", "total earnings", "total gross",
+        "මුළු ආදායම",                                      # verified on a real Sinhala payslip (2026-10-20)
         "දළ වැටුප", "මුළු ඉපැයීම්",                       # TODO verify on real payslips
         "மொத்த சம்பளம்", "மொத்த வருமானம்",                # TODO verify on real payslips
     ],
@@ -41,9 +42,10 @@ FIELD_LABELS: Dict[str, List[str]] = {
         "epf employer", "employer epf", "epf 12%", "epf (12%)", "epf employer 12%", "company epf",
         "epf corporation contribution", "epf company contribution", "epf employer contribution",
         "epf corpn contribution",
+        "පී සංස්ථා දායකත්වය",            # 'ඊ.පී.එෆ්. සංස්ථා දායකත්වය' on a real Sinhala payslip; OCR keeps the 'පී'
     ],
     "etf": [
-        "etf", "etf 3%", "etf (3%)", "employer etf",
+        "etf", "etf 3%", "etf (3%)", "employer etf", "සංස්ථා දායකත්වය",   # Sinhala: corporation contribution without 'පී' = ETF
         "සේවා නියුක්තයන්ගේ භාරකාර අරමුදල", "ஊழியர் நம்பிக்கை நிதியம்",
     ],
     "apit": [
@@ -52,6 +54,7 @@ FIELD_LABELS: Dict[str, List[str]] = {
     ],
     "total_deductions": [
         "total deductions", "total deduction", "deductions total",
+        "මුළු අඩුකිරීම්",                                 # verified on a real Sinhala payslip
         "මුළු අඩු කිරීම්", "மொத்த கழிவுகள்",
     ],
     "net_amount": [
@@ -61,6 +64,8 @@ FIELD_LABELS: Dict[str, List[str]] = {
 }
 
 WORD_MATCH = 0.80     # per-word similarity needed (handles 1 wrong letter in ~5)
+WORD_MATCH_SI_TA = 0.70   # Sinhala/Tamil: OCR often confuses vowel signs ('අඩුකීරීමි' for 'අඩුකිරීම්')
+RECOVERY = {"recovery", "recoveries", "ප්‍රතිසාධනය", "ප්‍රනිසාධනය", "ප්‍රනතිසාධනය"}
 FIELD_MATCH = 0.80    # overall score needed to accept a label
 
 
@@ -86,7 +91,7 @@ def _phrase_score(label_words: List[str], phrase: str) -> float:
         # Short words (<= 4 letters, e.g. 'pay', 'net', 'epf') must match exactly: one wrong
         # letter changes their meaning ('pay' is not 'paye').
         s = max((1.0 if w == lw else 0.0) if len(w) <= 4 else _sim(w, lw) for lw in label_words)
-        if s < WORD_MATCH:
+        if s < (WORD_MATCH_SI_TA if re.search(r"[\u0D80-\u0DFF\u0B80-\u0BFF]", w) else WORD_MATCH):
             return 0.0
         best.append(s)
     return sum(best) / len(best)
@@ -112,7 +117,11 @@ def match_field(label_text: str) -> Optional[Tuple[str, float, str]]:
     _, field, s, p = best
     # 'EPF Gross' / 'ETF Gross' are the BASE amounts the contributions are calculated on, not the
     # contributions themselves; matching them as epf/etf put the wrong amount in those fields.
-    if field in ("epf_employee", "epf_employer", "etf") and "gross" in words:
+    if field in ("epf_employee", "epf_employer", "etf") and ("gross" in words or "දළ" in words):
+        return None
+    # A 'recovery' line is a deduction ('... මුලික වැටුප් ප්‍රතිසාධනය' = performance-base salary recovery),
+    # never the basic salary or an allowance.
+    if field in ("basic_salary", "allowances") and RECOVERY & set(words):
         return None
     # Percentage cue resolves EPF employee (8%) vs employer (12%) when the words alone are ambiguous.
     if field.startswith("epf_"):
