@@ -65,6 +65,8 @@ def parse_date(text: str) -> Optional[date]:
                     y, mo, d = int(m[1]), int(m[2]), int(m[3])
                 elif kind == "dmy":
                     d, mo, y = int(m[1]), int(m[2]), int(m[3])
+                    if mo > 12 >= d:            # '10/21/25': printed month first (US style)
+                        d, mo = mo, d
                 else:
                     d, mo, y = int(m[1]), MONTHS[m[2][:3].lower()], int(m[3])
                 y = y + 2000 if y < 100 else y
@@ -105,12 +107,25 @@ def _word_hit(word: str, tokens) -> Optional[object]:
 
 def _find_issuer(lines: List[Line]):
     """Match the statement header against the list of Sri Lankan banks; returns the official name."""
+    # Transaction rows (they start with a date such as 120825) hold shop and payee names, never the bank.
+    lines = [ln for ln in lines if not TXN_DATE.match(ln.text)]
     header = [t for ln in lines[: max(8, len(lines) // 3)] for t in ln.tokens]
     for name, words in BANKS:
         hits = [_word_hit(w, header) for w in words]
         if all(hits):
-            return name, Line(hits)
-    return _find_issuer_line(lines)
+            return name, Line(hits), "header"
+    # Some banks print their name only in a round stamp. On the whole page a shop name can look like a
+    # bank ('CARGILLS - KOTHALAWA' is a supermarket purchase), so the word 'bank' must appear within
+    # two lines of the bank's own words.
+    for name, words in BANKS:
+        need = words if "bank" in words else words + ["bank"]
+        for i in range(len(lines)):
+            near = [t for ln in lines[max(0, i - 2): i + 3] for t in ln.tokens]
+            hits = [_word_hit(w, near) for w in need]
+            if all(hits):
+                return name, Line(hits), "stamp"
+    name, ln = _find_issuer_line(lines)
+    return name, ln, "header"
 
 
 def _find_issuer_line(lines: List[Line]):
@@ -134,6 +149,45 @@ def _find_date(lines: List[Line]):
             if d:
                 return d, ln
     return None, None
+
+
+TXN_DATE = re.compile(r"^\W*(\d{2})(\d{2})(\d{2})\b|^\W*(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*(\d{2})\b",
+                      re.I)
+END = re.compile(r"end of statement|closing", re.I)
+MONEY = re.compile(r"\d{1,3}(?:,\d{3})+[.\s]\d{2}(?!\d)|\d+[.\s]\d{2}(?!\d)")
+
+
+def row_amounts(tokens) -> List[float]:
+    """Money values in a table row, rebuilt from the whole row because OCR often splits an amount at
+    its decimal point ('4,118 17') and misreads 0 as @ inside numbers ('5 0@')."""
+    text = " ".join(t.text for t in tokens)
+    text = re.sub(r"(?<=\d)[@Oo](?=\d|\b)|(?<=\s)[@Oo](?=\d)", "0", text)
+    return [float(re.sub(r"[,\s]", "", m.replace(" ", ".", 1) if "." not in m else m).replace(",", ""))
+            for m in MONEY.findall(text)]
+
+
+def _transactions(lines: List[Line]):
+    """Table rows that start with a transaction date (310725 or 29JUL24) and end with an amount;
+    returns [(date, [amounts...], line)] in page order, up to 'END OF STATEMENT' / closing line."""
+    rows = []
+    for ln in lines:
+        if END.search(ln.text):
+            break
+        m = TXN_DATE.match(ln.text)
+        if not m:
+            continue
+        try:
+            if m[1]:
+                d = date(2000 + int(m[3]), int(m[2]), int(m[1]))
+            else:
+                d = date(2000 + int(m[6]), MONTHS[m[5][:3].lower()], int(m[4]))
+        except ValueError:
+            continue
+        _, amount = split_amount(ln)
+        values = row_amounts(amount)
+        if values:
+            rows.append((d, values, ln))
+    return rows
 
 
 def _running_balances(lines: List[Line]) -> List[float]:
@@ -166,6 +220,16 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
                     found[key] = (p.value, p, toks)
 
     checks, corrections, notes = [], {}, {}
+    txns = _transactions(lines)
+    closing_from_row = False
+    if "closing" not in found and txns:
+        # No 'closing balance' line (e.g. Bank of Ceylon prints '*** END OF STATEMENT ***'):
+        # the balance column of the last transaction row is the closing balance.
+        last = txns[-1]
+        _, amount = split_amount(last[2])
+        value = last[1][-1]
+        found["closing"] = (value, parse_amount(f"{value:.2f}"), amount[-2:] if len(amount) >= 2 else amount)
+        closing_from_row = True
     closing = found["closing"][0] if "closing" in found else None
     balances = _running_balances(lines)
 
@@ -180,6 +244,13 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
             return None
         return abs(balances[-1] - c) <= TOL
 
+    def rule_last_row(c):
+        """Last row: previous balance +/- this row's amount = closing balance."""
+        if not closing_from_row or len(txns) < 2 or len(txns[-1][1]) < 2:
+            return None
+        prev, amt = txns[-2][1][-1], txns[-1][1][-2]
+        return min(abs(prev - amt - c), abs(prev + amt - c)) <= TOL
+
     def run_checks(c):  # noqa: C901
         out = []
         # The flow rule is hard (all four printed totals). The running-balance rule is soft: table rules
@@ -191,6 +262,10 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
             r = fn(c)
             if r is not None:
                 out.append({"rule": name, "hard": hard, "passed": r, "explanation": text})
+        r = rule_last_row(c)
+        if r is not None:
+            out.append({"rule": "previous balance -/+ last amount = closing", "hard": False, "passed": r,
+                        "explanation": "the last row's running balance follows from the row above it"})
         return out
 
     checks = run_checks(closing)
@@ -212,13 +287,19 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
                                      bbox=[int(x) for x in (to_original(box) if to_original else box)],
                                      tax_entity=ONTOLOGY.get(name, {}).get("tax_entity"), needs_review=needs_review(c)))
 
-    issuer, iln = _find_issuer(lines)
+    issuer, iln, where = _find_issuer(lines)
     if issuer:
-        add("issuer", issuer, iln.text, _conf(iln.tokens), iln.tokens)
-        notes["issuer"] = ["bank identified from its name words in the header (list of Sri Lankan banks)"]
+        add("issuer", issuer, iln.text, _conf(iln.tokens) * (1.0 if where == "header" else 0.85), iln.tokens)
+        notes["issuer"] = [f"bank identified from its name words in the {where} (list of Sri Lankan banks)"]
     d, dln = _find_date(lines)
     if d:
         add("document_date", d.isoformat(), dln.text, _conf(dln.tokens), dln.tokens)
+    if txns:
+        # The statement covers the transactions, which can be months before the print date.
+        last_d, _, tln = txns[-1]
+        add("pay_period", f"{last_d.year}-{last_d.month:02d}", tln.text, _conf(tln.tokens[:1]) * 0.9, tln.tokens[:1])
+        notes["pay_period"] = ["statement month taken from the last transaction date"]
+    elif d:
         add("pay_period", f"{d.year}-{d.month:02d}", dln.text, _conf(dln.tokens) * 0.9, dln.tokens)
         notes["pay_period"] = ["statement month taken from the statement date"]
     if "closing" in found:
@@ -228,7 +309,8 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
             verified=bool(hard) and all(hard) and "total_amount" not in corrections,
             corrected="total_amount" in corrections, contradicted=bool(hard) and not all(hard),
             cleaned=p.corrected)
-        notes["total_amount"] = ["closing balance of the statement"]
+        notes["total_amount"] = ["closing balance of the statement" + (
+            " (balance of the last transaction row; no closing-balance line printed)" if closing_from_row else "")]
 
     overall = round(sum(f.confidence for f in fields) / len(fields), 3) if fields else 0.0
     out = OCROutput(doc_id=doc_id, document_type="bank_statement", languages=languages or ["en"],
