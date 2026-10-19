@@ -21,7 +21,7 @@ from explanation_agent.models import Claim, Explanation, LlmCall, RewriteStatus
 from explanation_agent.post_check import TAG, check
 from tax_calculation_agent.engine import CalcStep
 
-PROMPT_VERSION = "explain-v2"  # v2: "%" and no number words
+PROMPT_VERSION = "explain-v3"  # v2: "%" and no number words; v3: the result comes last
 PROMPT_TEMPLATE = """\
 You explain a Sri Lankan income tax calculation to a taxpayer who is not a tax expert.
 Below is one line per calculation step, as JSON. Rewrite each line in plain, friendly English,
@@ -31,6 +31,8 @@ Rules you must follow:
 - Keep every number exactly as it is. Do not add, remove, round or recompute any number.
 - Write numbers only in digits and percentages only with "%". Never use number words such as
   "one", "zero", "twenty", "million" or "percent", even in phrases like "no one".
+- End each line with the step's result, the figure after "Rs." at the end of its input line.
+  No other number may come after it; only the citation tags may follow.
 - Keep every citation tag in square brackets, such as [RULE-ID], exactly as written and on
   the same line. Do not add any other square-bracket tags.
 - Keep one line per step, with the same step_id, in the same order.
@@ -77,9 +79,13 @@ def build_prompt(steps: Sequence[CalcStep], lines: Sequence[str]) -> str:
 
 
 def explain(
-    steps: Sequence[CalcStep], rules_used: Mapping[str, str], llm: TextLLM | None = None
+    steps: Sequence[CalcStep],
+    rules_used: Mapping[str, str],
+    llm: TextLLM | None = None,
+    year_of_assessment: str | None = None,
 ) -> ExplainOutcome:
-    """Explain `steps`. `rules_used` maps each rule_id the answer may cite to its citation.
+    """Explain `steps`. `rules_used` maps each rule_id the answer may cite to its citation;
+    `year_of_assessment` is the request's own year, which the rewrite may name.
 
     Without an LLM the template is the explanation. With one, its rewrite is used only if it
     passes the post-check. An LLM error falls back to the template without a confidence
@@ -107,7 +113,7 @@ def explain(
         temperature=llm.temperature,
         output=reply,
     )
-    result = check(reply, steps, template, rules_used)
+    result = check(reply, steps, template, rules_used, year_of_assessment)
     if result.passed:
         return ExplainOutcome(_explanation(steps, result.lines, rules_used, "accepted"), call)
     explanation = _explanation(
