@@ -8,6 +8,7 @@ StageError; the runner records it and goes straight to `deliver`.
     assure: PASS / HUMAN_REVIEW -> deliver
             REGENERATE (attempt 1) -> regenerate -> rerun from the stage C4 names
             REGENERATE (attempt 2) -> deliver, needs review
+            C4 unreachable          -> deliver, marked as not checked by C4
 
 The INTERPRET stage (LLM classification of ambiguous items) is not in v1: employment income
 and APIT need no interpretation. The only LLM is the optional plain-language rewrite in
@@ -28,6 +29,7 @@ from explanation_agent.explainer import explain as explain_steps
 from orchestrator.clients import (
     AssuranceClient,
     ComponentUnavailable,
+    MockAssuranceClient,
     OcrClient,
     RetrievalClient,
 )
@@ -225,7 +227,11 @@ def assure(state: PipelineState, deps: Deps) -> Update:
         conflicts=state.get("conflicts", ()),
         warnings=_warnings(state),
     )
-    verdict = deps.assurance.assure(trace)
+    try:
+        verdict = deps.assurance.assure(trace)
+    except ComponentUnavailable as e:
+        # Not fatal: the figures are the engine's either way. deliver says nothing checked them.
+        return {"trace": trace, "assurance_error": str(e)}
     if (verdict.request_id, verdict.attempt) != (request.request_id, attempt):
         raise StageError(
             f"C4 verdict is for {verdict.request_id} attempt {verdict.attempt}, "
@@ -266,15 +272,33 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
     conflicts = state.get("conflicts", ())
     reasons: list[str] = []
 
+    assurance_error = state.get("assurance_error")
+    if assurance_error:
+        assurance = "unavailable"
+        note = f"Not checked by C4: {assurance_error}. Status is from C1's own checks only."
+    elif isinstance(deps.assurance, MockAssuranceClient):
+        assurance, note = "mock", "C4 is mocked: its verdicts are scripted, not a real check."
+    else:
+        assurance, note = "live", "Checked by C4."
+
     if error := state.get("error"):
         status = "failed"
         reasons.append(error)
     else:
-        last = verdicts[-1]
-        if last.decision == "HUMAN_REVIEW":
+        # Only a verdict on the delivered attempt counts. With C4 down there is none: that
+        # alone is no reason for review, so the status rests on C1's own rules below. The
+        # exception: C4 flagged attempt 1, so an unverified retry is not delivered as clean.
+        last = verdicts[-1] if verdicts and verdicts[-1].attempt == state["attempt"] else None
+        if last is not None and last.decision == "HUMAN_REVIEW":
             reasons += ["C4 asked for human review", *last.reasons]
-        elif last.decision == "REGENERATE":
+        elif last is not None and last.decision == "REGENERATE":
             reasons += ["C4 still found problems after regenerating once", *last.reasons]
+        elif assurance_error and verdicts and verdicts[-1].decision == "REGENERATE":
+            reasons += [
+                f"C4 flagged attempt {verdicts[-1].attempt} and the retry could not be "
+                "verified (C4 unavailable)",
+                *verdicts[-1].reasons,
+            ]
         if confidence is not None and confidence.score < deps.review_threshold:
             reasons.append(
                 f"C1 confidence {confidence.score} is below the review threshold "
@@ -298,6 +322,8 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
             warnings=_warnings(state),
             stages_run=(*state.get("stages_run", ()), "deliver"),
             pii_redacted=state.get("pii_redacted", 0),
+            assurance=assurance,
+            assurance_note=note,
         )
     }
 
