@@ -1,5 +1,5 @@
 # Core (install first): python -m pip install -r requirements.txt
-opencv-python==4.10.0.84
+opencv-contrib-python==4.10.0.84   # contrib = opencv-python + extras; PaddleOCR needs it, and both cannot be installed together
 numpy>=1.26
 pillow>=10.0
 pytesseract==0.3.13

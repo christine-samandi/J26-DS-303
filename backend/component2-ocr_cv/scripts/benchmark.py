@@ -28,16 +28,16 @@ from typing import Callable, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from api.pipeline import UnsupportedFile, available_languages, decode_upload  # noqa: E402
-from entity_extraction.payslip import extract_document  # noqa: E402
-from ocr_engines.tesseract_engine import run_tesseract, tokens_to_text  # noqa: E402
-from preprocessing import preprocess  # noqa: E402
+from api.pipeline import UnsupportedFile, analyse, available_languages, decode_upload  # noqa: E402
+from ocr_engines.tesseract_engine import tokens_to_text  # noqa: E402
 from scripts.dataset import DATA, read_manifest  # noqa: E402
 from scripts.metrics import (FieldResult, cer_wer, expected_calibration_error,  # noqa: E402
                              precision_recall_f1, review_quality, score_fields)
 
-# engine name -> function(image, lang) -> tokens. PaddleOCR is added here later; nothing else changes.
-ENGINES: Dict[str, Callable] = {"tesseract": lambda img, lang: run_tesseract(img, lang=lang)}
+
+
+# Engines are run through api.pipeline.analyse, so the benchmark measures exactly what the API serves.
+ENGINES = ("tesseract", "paddle", "fusion")
 MODES = ("raw", "pre")
 LANG_CODES = {"en": "eng", "si": "sin", "ta": "tam"}
 
@@ -50,18 +50,9 @@ def tesseract_lang(manifest_language: str, installed: List[str]) -> str:
 
 
 def run_one(img, engine: str, mode: str, lang: str, doc_id: str):
-    """Same steps as api.pipeline.run_pipeline, but keeps the tokens for CER/WER."""
-    t0 = time.time()
-    to_original = None
-    if mode == "pre":
-        res = preprocess(img)
-        tokens = ENGINES[engine](res.image, lang)
-        to_original = res.to_original_bbox
-    else:
-        tokens = ENGINES[engine](img, lang)
-    ms = int((time.time() - t0) * 1000)
-    out, _ = extract_document(tokens, doc_id=doc_id, engine=engine, processing_ms=ms, to_original=to_original)
-    return out, tokens, ms
+    """One image through the full pipeline; keeps the tokens for CER/WER (Tesseract's for fusion)."""
+    out, _, tokens = analyse(img, doc_id, lang=lang, use_preprocessing=(mode == "pre"), engine=engine)
+    return out, tokens, out.processing_ms or 0
 
 
 def summarise(results: List[FieldResult], images: List[dict]) -> dict:

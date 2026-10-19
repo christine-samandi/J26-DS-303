@@ -1,4 +1,4 @@
 # Optional second engine (large download, install separately on Oct 17-18):
 # python -m pip install -r requirements-paddle.txt
-paddlepaddle==2.6.2
-paddleocr==2.8.1
+paddlepaddle==3.3.1
+paddleocr==3.7.0
