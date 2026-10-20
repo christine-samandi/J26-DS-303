@@ -88,3 +88,15 @@ def test_noise_estimate_increases_with_noise():
     low = np.clip(page + rng.normal(0, 3, page.shape), 0, 255).astype(np.uint8)
     high = np.clip(page + rng.normal(0, 20, page.shape), 0, 255).astype(np.uint8)
     assert estimate_noise(high) > estimate_noise(low) + 5
+
+
+def test_perspective_ignores_ruled_table_on_the_page():
+    """A payslip table with a printed border must not be taken as the page: the header
+    above it (issuer, name, NIC) would be cropped away before OCR and PII masking."""
+    page = np.full((1000, 800), 235, np.uint8)
+    cv2.putText(page, "HEADER LINE WITH NAME", (60, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, 0, 2)
+    cv2.rectangle(page, (40, 200), (760, 960), 0, 4)       # ruled table border
+    for y in range(260, 940, 60):
+        cv2.putText(page, "Label 12,345.00", (70, y), cv2.FONT_HERSHEY_SIMPLEX, 1, 0, 2)
+    _, _, applied = correct_perspective(page)
+    assert not applied
