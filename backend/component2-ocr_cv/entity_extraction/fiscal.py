@@ -6,7 +6,8 @@ makes sense. A payslip, however, must obey arithmetic:
     net pay = gross pay - total deductions            (always true - a HARD rule)
     gross   = basic + allowances                      (true unless other earnings exist - SOFT)
     total deductions = EPF(employee) + APIT           (true unless other deductions exist - SOFT)
-    EPF employee = 8%, EPF employer = 12%, ETF = 3% of EPF-liable earnings (basic or gross - SOFT)
+    EPF employee = 8%, EPF employer = 12% (15% at some employers), ETF = 3% of EPF-liable
+    earnings (basic, basic + COLA, or gross - SOFT)
 This module (1) checks every rule whose fields were found, and (2) when a rule fails, tries the
 most likely OCR misreadings of each amount (one extra digit, one dropped digit, one look-alike
 digit swap such as 3<->8, 1<->7) and keeps a change only if it makes the arithmetic consistent
@@ -38,10 +39,20 @@ def _eq(a: float, b: float) -> bool:
     return abs(a - b) <= TOL
 
 
-def _rate_rule(f: str, rate: float):
+def epf_bases(v: Dict[str, float]) -> List[float]:
+    """Possible EPF-liable earnings. By law COLA (cost-of-living allowance) is EPF-liable, so a
+    real Sinhala slip calculates EPF/ETF on basic + COLA (179,045.79 + 12,789.50)."""
+    bases = [v[b] for b in ("basic_salary", "gross_income") if b in v]
+    if "basic_salary" in v and "cola" in v:
+        bases.append(v["basic_salary"] + v["cola"])
+    return bases
+
+
+def _rate_rule(f: str, *rates: float):
+    """Several rates are allowed: most employers pay 12% employer EPF, some (e.g. semi-government
+    bodies) pay 15%; the payslip in hand decides which one its arithmetic matches."""
     def check(v):
-        bases = [v[b] for b in ("basic_salary", "gross_income") if b in v]
-        return any(_eq(v[f], round(base * rate, 2)) for base in bases)
+        return any(_eq(v[f], round(base * r, 2)) for base in epf_bases(v) for r in rates)
     return check
 
 
@@ -56,11 +67,11 @@ RULES: List[Rule] = [
          lambda v: _eq(v["total_deductions"], v["epf_employee"] + v["apit"]),
          "total deductions equal employee EPF plus APIT"),
     Rule("EPF employee = 8%", ("epf_employee",), False, _rate_rule("epf_employee", 0.08),
-         "employee EPF is 8% of basic or gross"),
-    Rule("EPF employer = 12%", ("epf_employer",), False, _rate_rule("epf_employer", 0.12),
-         "employer EPF is 12% of basic or gross"),
+         "employee EPF is 8% of EPF-liable earnings"),
+    Rule("EPF employer = 12% or 15%", ("epf_employer",), False, _rate_rule("epf_employer", 0.12, 0.15),
+         "employer EPF is 12% (or 15% at some employers) of EPF-liable earnings"),
     Rule("ETF = 3%", ("etf",), False, _rate_rule("etf", 0.03),
-         "ETF is 3% of basic or gross"),
+         "ETF is 3% of EPF-liable earnings"),
 ]
 
 

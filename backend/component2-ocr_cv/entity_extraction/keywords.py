@@ -17,7 +17,7 @@ from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
 # Fields with an output-schema name, plus two helper fields used only for arithmetic checks.
-HELPER_FIELDS = {"basic_salary", "allowances"}
+HELPER_FIELDS = {"basic_salary", "allowances", "cola"}   # cola: cost-of-living allowance, part of EPF-liable earnings
 
 FIELD_LABELS: Dict[str, List[str]] = {
     "gross_income": [
@@ -29,6 +29,12 @@ FIELD_LABELS: Dict[str, List[str]] = {
     "basic_salary": [
         "basic salary", "basic pay", "basic",
         "මූලික වැටුප", "அடிப்படைச் சம்பளம்", "அடிப்படை சம்பளம்",
+        "සමගාමී වැටුප",                                   # basic-salary row on a real Sinhala payslip (2026-10-20)
+    ],
+    "cola": [
+        "cola", "c.o.l.a", "cost of living allowance", "cost of living",
+        "සී.එල්.ඒ. ගැලපීම", "සී.එල්.ඒ.",                  # verified on a real Sinhala payslip (2026-10-20)
+        "ජීවන වියදම් දීමනාව",                              # TODO verify on real payslips
     ],
     "allowances": [
         "allowances", "allowance", "total allowances",
@@ -121,11 +127,11 @@ def match_field(label_text: str) -> Optional[Tuple[str, float, str]]:
         return None
     # A 'recovery' line is a deduction ('... මුලික වැටුප් ප්‍රතිසාධනය' = performance-base salary recovery),
     # never the basic salary or an allowance.
-    if field in ("basic_salary", "allowances") and RECOVERY & set(words):
+    if field in ("basic_salary", "allowances", "cola") and RECOVERY & set(words):
         return None
     # Percentage cue resolves EPF employee (8%) vs employer (12%) when the words alone are ambiguous.
     if field.startswith("epf_"):
-        if "12%" in label:
+        if "12%" in label or "15%" in label:
             field = "epf_employer"
         elif "8%" in label:
             field = "epf_employee"

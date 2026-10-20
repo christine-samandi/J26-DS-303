@@ -69,3 +69,24 @@ def test_clean_reading_passes_self_check_and_better_reading_wins():
     good = reading_quality(clean, passed, 5)
     assert not looks_broken(good)
     assert good > reading_quality(clean, {"checks": []}, 5)     # a passing hard check outranks
+
+
+def test_no_issuer_guess_from_a_noisy_line():
+    """A slip without a company name: a low-confidence noise line must not become the issuer."""
+    lines = group_lines(page([("\"'..... ;;; ab", "")], conf=0.35) + page([("", "")]))
+    assert find_issuer(lines) is None
+
+
+def test_epf_on_basic_plus_cola_at_15_percent_passes():
+    """Real Sinhala slip arithmetic: EPF-liable = basic + COLA; employer EPF 15%, ETF 3%."""
+    from entity_extraction.fiscal import validate_and_correct
+    rep = validate_and_correct({"basic_salary": 179045.79, "cola": 12789.50,
+                                "epf_employer": 28775.29, "etf": 5755.06})
+    passed = {c.rule: c.passed for c in rep.checks}
+    assert passed["EPF employer = 12% or 15%"] and passed["ETF = 3%"]
+    assert not rep.corrections
+
+
+def test_sinhala_basic_salary_and_cola_labels():
+    found = extract_fields(page([("'සමගාමි වැටුප", "179,045.79"), ("සී.එල්.ඒ. ගැලපීම", "12,789.50")]))
+    assert found["basic_salary"].value == 179045.79 and found["cola"].value == 12789.50
