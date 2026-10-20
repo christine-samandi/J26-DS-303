@@ -1,7 +1,11 @@
-
 from dataclasses import replace
-
-from human_review.models import ReviewCase, ReviewCaseStatus
+from datetime import datetime, timezone
+from human_review.models import (
+    ReviewCase, 
+    ReviewCaseStatus,
+    ReviewFeedback,
+    ReviewerDecision,
+)
 
 
 class ReviewCaseNotFoundError(Exception):
@@ -70,6 +74,52 @@ class ReviewCaseRepository:
             status=ReviewCaseStatus.IN_REVIEW,
         )
 
+        self._cases[case_id] = updated_case
+
+        return updated_case
+    
+    def complete_review(
+        self,
+        case_id: str,
+        reviewer_id: str,
+        decision: ReviewerDecision,
+        comment: str,
+    ) -> ReviewCase:
+        """Complete a review case and store the reviewer's feedback."""
+
+        case = self.get_case(case_id)
+
+        # A reviewer must start the case before completing it.
+        if case.status != ReviewCaseStatus.IN_REVIEW:
+            raise ValueError(
+                "Only IN_REVIEW cases can be completed."
+            )
+
+        if not reviewer_id or not reviewer_id.strip():
+            raise ValueError("Reviewer ID cannot be empty.")
+
+        if not isinstance(decision, ReviewerDecision):
+            raise ValueError("Invalid reviewer decision.")
+
+        if not comment or not comment.strip():
+            raise ValueError("Review comment cannot be empty.")
+
+        # Create the reviewer feedback record.
+        feedback = ReviewFeedback(
+            reviewer_id=reviewer_id.strip(),
+            decision=decision,
+            comment=comment.strip(),
+            reviewed_at=datetime.now(timezone.utc),
+        )
+
+        # Preserve the original findings and assurance decision.
+        updated_case = replace(
+            case,
+            status=ReviewCaseStatus.COMPLETED,
+            feedback=feedback,
+        )
+
+        # Save the updated review case.
         self._cases[case_id] = updated_case
 
         return updated_case

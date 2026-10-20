@@ -15,6 +15,24 @@ class ReviewCaseStatus(str, Enum):
     COMPLETED = "COMPLETED"
 
 
+class ReviewerDecision(str, Enum):
+    """Possible decisions submitted by a human reviewer."""
+
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    REQUEST_CORRECTION = "REQUEST_CORRECTION"
+
+
+@dataclass(frozen=True)
+class ReviewFeedback:
+    """Feedback submitted by a human reviewer."""
+
+    reviewer_id: str
+    decision: ReviewerDecision
+    comment: str
+    reviewed_at: datetime
+
+
 @dataclass(frozen=True)
 class ReviewCase:
     """A tax-assurance result escalated for human review."""
@@ -25,3 +43,6 @@ class ReviewCase:
     created_at: datetime
     findings: tuple[VerificationFinding, ...]
     decision: AssuranceDecision
+
+    # Empty until a human reviewer completes the case.
+    feedback: ReviewFeedback | None = None
