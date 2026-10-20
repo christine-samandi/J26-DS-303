@@ -134,7 +134,7 @@ def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
 
 
 def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing: bool = True,
-            engine: str = "tesseract") -> Tuple[OCROutput, dict, Sequence]:
+            engine: str = "tesseract", mask_pii: bool = True) -> Tuple[OCROutput, dict, Sequence]:
     """The whole pipeline for one image. Returns (contract output, explanation report, tokens used
     for the text). The benchmark uses the tokens for CER/WER; the API only needs the first two."""
     from entity_extraction.fusion import extract_fused
@@ -157,19 +157,35 @@ def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing:
         lang = "eng"
         language = {"requested": AUTO, "used": "en (PaddleOCR)", "reason": "PaddleOCR reads English/Tamil models only"}
 
+    from privacy import mask_tokens
+    pii_counts, pii_boxes = {}, []
+
+    def guard(toks):
+        """Mask personal identifiers right after OCR, before any other step sees them (NFR4)."""
+        if not mask_pii:
+            return toks
+        masked, rep = mask_tokens(toks)
+        for k, v in rep.counts.items():
+            pii_counts[k] = max(pii_counts.get(k, 0), v)
+        pii_boxes.extend(rep.regions)
+        return masked
+
     if engine == "fusion":
-        by_engine = {"tesseract": tess_tokens if tess_tokens is not None else read_tokens(page, "tesseract", lang),
-                     "paddle": read_tokens(page, "paddle", lang)}
+        by_engine = {"tesseract": guard(tess_tokens if tess_tokens is not None else read_tokens(page, "tesseract", lang)),
+                     "paddle": guard(read_tokens(page, "paddle", lang))}
         out, report = extract_fused(by_engine, doc_id, to_original=to_original)
         tokens = by_engine["tesseract"]
     else:
-        tokens = tess_tokens if tess_tokens is not None else read_tokens(page, engine, lang)
+        tokens = guard(tess_tokens if tess_tokens is not None else read_tokens(page, engine, lang))
         out, report = extract_document(tokens, doc_id=doc_id, engine=ENGINE_LABELS.get(engine, engine),
                                       to_original=to_original)
     out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
     report["engine"] = engine
     report["ocr_language"] = language
+    report["privacy"] = {"enabled": mask_pii, "masked": dict(sorted(pii_counts.items())),
+                         "boxes": [[int(v) for v in (to_original(b) if to_original else b)] for b in pii_boxes],
+                         "note": "personal identifiers masked right after OCR; values are never returned"}
     return out, report, tokens
 
 
@@ -187,6 +203,15 @@ def process_upload(data: bytes, filename: str, doc_id: Optional[str] = None, lan
     if pages > 1:
         report["note"] = f"PDF has {pages} pages; only page 1 was processed"
     return PipelineResult(output=out, report=report, image=img, pages=pages)
+
+
+def blackout(img: np.ndarray, boxes) -> np.ndarray:
+    """Cover masked personal data on the image (solid black boxes, a little padding)."""
+    vis = img.copy()
+    for x, y, w, h in boxes:
+        pad = max(2, h // 5)
+        cv2.rectangle(vis, (max(0, x - pad), max(0, y - pad)), (x + w + pad, y + h + pad), (0, 0, 0), -1)
+    return vis
 
 
 def draw_fields(img: np.ndarray, out: OCROutput) -> np.ndarray:

@@ -18,8 +18,8 @@ import cv2
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from api.pipeline import (Engine, EngineUnavailable, UnsupportedFile, available_languages, draw_fields,
-                          process_upload)
+from api.pipeline import (Engine, EngineUnavailable, UnsupportedFile, available_languages, blackout,
+                          draw_fields, process_upload)
 from api.schema import OCROutput
 
 app = FastAPI(
@@ -113,7 +113,7 @@ def extract_visual(file: UploadFile = File(...), lang: str = Query("auto", descr
     """Returns the uploaded image with a box on every extracted field
     (green = trusted, orange = needs review): shows where each value came from."""
     r = _run(file, lang, preprocess, doc_id, engine)
-    ok, png = cv2.imencode(".png", draw_fields(r.image, r.output))
+    ok, png = cv2.imencode(".png", draw_fields(blackout(r.image, r.report.get("privacy", {}).get("boxes", [])), r.output))
     if not ok:
         raise HTTPException(500, "could not draw the result image")
     return Response(content=png.tobytes(), media_type="image/png",
