@@ -1,13 +1,25 @@
-
+from datetime import datetime
 from decimal import Decimal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
 )
+
+from decision_engine.engine import AssuranceAction
+from human_review.models import (
+    ReviewCase,
+    ReviewCaseStatus,
+    ReviewerDecision,
+)
+from human_review.repository import (
+    ReviewCaseNotFoundError,
+    ReviewCaseRepository,
+)
+from human_review.service import create_review_case
 
 from assurance_pipeline.pipeline import (
     assure_citation,
@@ -422,3 +434,223 @@ def verify_combined_assurance(request: CombinedCheckRequest):
         findings=findings,
         decision=decision,
     )
+
+
+class CreateReviewCaseRequest(CombinedCheckRequest):
+    request_id: str | None = None
+
+    @field_validator("request_id")
+    @classmethod
+    def validate_request_id(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError("Request ID cannot be blank.")
+        return value
+
+
+class CompleteReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_id: str
+    decision: ReviewerDecision
+    comment: str
+
+    @field_validator("reviewer_id", "comment")
+    @classmethod
+    def validate_nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("Field cannot be blank.")
+        return value
+
+
+class ReviewFeedbackResponse(BaseModel):
+    reviewer_id: str
+    decision: ReviewerDecision
+    comment: str
+    reviewed_at: datetime
+
+
+class ReviewCaseResponse(BaseModel):
+    case_id: str
+    request_id: str | None
+    status: ReviewCaseStatus
+    created_at: datetime
+    findings: list[FindingResponse]
+    decision: DecisionResponse
+    feedback: ReviewFeedbackResponse | None
+
+
+# Prototype repository. Cases are stored in memory.
+review_repository = ReviewCaseRepository()
+
+
+def review_case_response(case: ReviewCase) -> ReviewCaseResponse:
+    """Convert a review case into a structured API response."""
+
+    findings = [
+        FindingResponse(
+            check_name=finding.check_name,
+            passed=finding.passed,
+            message=finding.message,
+            severity=finding.severity.value,
+            error_code=finding.error_code.value,
+            expected_value=(
+                str(finding.expected_value)
+                if finding.expected_value is not None
+                else None
+            ),
+            actual_value=(
+                str(finding.actual_value)
+                if finding.actual_value is not None
+                else None
+            ),
+        )
+        for finding in case.findings
+    ]
+
+    feedback = None
+
+    if case.feedback is not None:
+        feedback = ReviewFeedbackResponse(
+            reviewer_id=case.feedback.reviewer_id,
+            decision=case.feedback.decision,
+            comment=case.feedback.comment,
+            reviewed_at=case.feedback.reviewed_at,
+        )
+
+    return ReviewCaseResponse(
+        case_id=case.case_id,
+        request_id=case.request_id,
+        status=case.status,
+        created_at=case.created_at,
+        findings=findings,
+        decision=DecisionResponse(
+            action=case.decision.action.value,
+            reason=case.decision.reason,
+            failed_checks=case.decision.failed_checks,
+        ),
+        feedback=feedback,
+    )
+
+
+@app.post(
+    "/human-review/cases",
+    response_model=ReviewCaseResponse,
+    status_code=201,
+)
+def create_human_review_case(request: CreateReviewCaseRequest):
+    claims = [
+        CitationClaim(
+            claim_id=claim.claim_id,
+            source_id=claim.source_id,
+            excerpt=claim.excerpt,
+        )
+        for claim in request.claims
+    ]
+
+    sources = [
+        EvidenceSource(
+            source_id=source.source_id,
+            text=source.text,
+        )
+        for source in request.sources
+    ]
+
+    result = assure_combined(
+        reported_total=request.reported_total,
+        line_items=request.line_items,
+        claims=claims,
+        sources=sources,
+        regeneration_attempts=request.regeneration_attempts,
+    )
+
+    if result.decision.action != AssuranceAction.HUMAN_REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail="This result does not require human review.",
+        )
+
+    case = create_review_case(
+        result,
+        request_id=request.request_id,
+    )
+
+    review_repository.add_case(case)
+
+    return review_case_response(case)
+
+
+@app.get(
+    "/human-review/cases",
+    response_model=list[ReviewCaseResponse],
+)
+def list_human_review_cases(
+    status: ReviewCaseStatus | None = None,
+):
+    cases = review_repository.list_cases(status=status)
+    return [review_case_response(case) for case in cases]
+
+
+@app.get(
+    "/human-review/cases/{case_id}",
+    response_model=ReviewCaseResponse,
+)
+def get_human_review_case(case_id: str):
+    try:
+        case = review_repository.get_case(case_id)
+    except ReviewCaseNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Review case not found.",
+        )
+
+    return review_case_response(case)
+
+
+@app.post(
+    "/human-review/cases/{case_id}/start",
+    response_model=ReviewCaseResponse,
+)
+def start_human_review(case_id: str):
+    try:
+        case = review_repository.start_review(case_id)
+    except ReviewCaseNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Review case not found.",
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        )
+
+    return review_case_response(case)
+
+
+@app.post(
+    "/human-review/cases/{case_id}/complete",
+    response_model=ReviewCaseResponse,
+)
+def complete_human_review(
+    case_id: str,
+    request: CompleteReviewRequest,
+):
+    try:
+        case = review_repository.complete_review(
+            case_id=case_id,
+            reviewer_id=request.reviewer_id,
+            decision=request.decision,
+            comment=request.comment,
+        )
+    except ReviewCaseNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Review case not found.",
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        )
+
+    return review_case_response(case)
