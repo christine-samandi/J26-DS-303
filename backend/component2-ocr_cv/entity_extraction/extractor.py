@@ -21,6 +21,7 @@ MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
 PERSONAL_FIELD = re.compile(r"^\W*(?:(name|nic|number|no|employee|emp|department|designation|address|"
                             r"account|date|period|month)\b|නම|අංකය|ජා\.?\s*හැ|ලිපිනය|දෙපාර්තමේන්තුව)", re.I)
+MIN_ISSUER_GUESS_CONF = 0.6   # first-line issuer guess needs a clearly read line
 ISSUER_HINTS = re.compile(r"\b(pvt|ltd|limited|plc|company|co\.|bank|holdings|corporation|\(pvt\))", re.I)
 
 
@@ -155,8 +156,14 @@ def find_issuer(lines: List[Line]) -> Optional[Candidate]:
             return Candidate("issuer", ln.text.strip(" -|"), ln.text, ocr_confidence=round(conf, 4),
                              bbox=union_bbox(ln.tokens))
     for ln in top:
-        if sum(c.isalpha() for c in ln.text) >= 3 and not split_amount(ln)[1]:
-            conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens) * 0.8
+        letters = sum(c.isalpha() for c in ln.text)
+        raw_conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
+        # A guess from a noisy line ('......', table rules, half-masked rows) is worse than no
+        # issuer: the field is then simply missing and C1 can ask the user.
+        if letters < 3 or letters < 0.5 * len(ln.text.replace(" ", "")) or raw_conf < MIN_ISSUER_GUESS_CONF:
+            continue
+        if not split_amount(ln)[1]:
+            conf = raw_conf * 0.8
             c = Candidate("issuer", ln.text.strip(" -|"), ln.text, ocr_confidence=round(conf, 4),
                           bbox=union_bbox(ln.tokens))
             c.notes.append("issuer guessed from the first text line (no company word found)")
