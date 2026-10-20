@@ -34,6 +34,7 @@ from pathlib import Path
 
 from entity_recognition.chunking import Chunk, load_chunks
 from entity_recognition.extract import extract_entities, normalise_date, words_to_number
+from knowledge_graph.reliefs import RELIEFS, ReliefStatements, relief_readings
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class RuleSpec:
     provision: str  # where the rule lives in the 2017 Act
     taxpayer_categories: tuple[str, ...]
     income_types: tuple[str, ...] = ("employment", "business", "investment", "other")
+    limited_to: str = ""  # reliefs: what the relief cannot exceed / is a share of
+    conditions: str = ""  # reliefs: who may claim it
 
 
 RULES = {
@@ -65,6 +68,12 @@ RULES = {
         ("resident_individual", "non_resident_individual"),  # "resident or non-resident"
     ),
 }
+# every other relief in Fifth Schedule para 2, read by the general relief engine
+RULES |= {
+    key: RuleSpec(key, "relief", r.title, r.id_prefix, f"Fifth Schedule, paragraph 2({r.letter})",
+                  r.taxpayer_categories, r.income_types, r.limited_to, r.conditions)
+    for key, r in RELIEFS.items()
+}  # fmt: skip
 
 Band = tuple[int, int | None, float]  # (lower, upper or None, rate %)
 
@@ -97,6 +106,7 @@ class Version:
     evidence_chunk_ids: list[str] = field(default_factory=list)
     supersedes: str | None = None
     superseded_by: str | None = None
+    value_kind: str = "amount"  # amount | cap | rate | bands
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -344,7 +354,7 @@ def build_timeline(
                 rule_id=f"{spec.id_prefix}-V{n}",
                 rule_key=spec.rule_key,
                 version=n,
-                value=value if isinstance(value, int) else [list(b) for b in value],
+                value=value if isinstance(value, (int, float)) else [list(b) for b in value],
                 valid_from=start,
                 valid_to=end - timedelta(days=1) if end else None,
                 status="active" if end is None else "replaced",
@@ -359,10 +369,52 @@ def build_timeline(
     return versions
 
 
+def relief_versions(rs: ReliefStatements, order: dict[str, int], start_of_law: date
+                    ) -> list[Version]:  # fmt: skip
+    """Versions of one relief from the general engine. The timeline is read from the LATEST
+    wording (it is the consolidated law: an amendment that ends a relief only says so in the
+    new wording); each version is then credited to the earliest Act that stated its value."""
+    if not rs.wordings:
+        return []
+    latest = rs.wordings[-1]
+    readings = [(r, w) for r, w in rs.readings if w is latest]
+    statements = [Statement(rs.spec.rule_key, r.value, r.start, r.end, w.document_id, w.chunk_id,
+                            r.matched) for r, w in readings]  # fmt: skip
+    versions = build_timeline(statements, RULES[rs.spec.rule_key], order, start_of_law)
+    kind = readings[0][0].kind if readings else "amount"
+    wording_chunks = list(dict.fromkeys(w.chunk_id for w in rs.wordings))
+    for v in versions:
+        v.value_kind = kind
+        first = next(
+            (w for r, w in rs.readings
+             if r.value == v.value and max(r.start or start_of_law, start_of_law) <= v.valid_from
+             and (r.end is None or v.valid_from < r.end)),
+            latest,
+        )  # fmt: skip
+        v.source_document_id, v.source_chunk_id = first.document_id, first.chunk_id
+        v.matched_text = " ".join(first.verbatim.split())
+        v.evidence_chunk_ids = list(dict.fromkeys([first.chunk_id, *wording_chunks]))
+    if versions and versions[-1].valid_to is not None:
+        versions[-1].status = "outdated"  # ended with no successor: the relief was withdrawn
+    return versions
+
+
 def build_versions(chunks: list[Chunk]) -> dict[str, list[Version]]:
     order, start = document_order(), corpus_start()
     readers = {"personal_relief": relief_statements, "individual_income_tax_slabs": slab_statements}
-    return {key: build_timeline(readers[key](chunks), RULES[key], order, start) for key in RULES}
+    out = {key: build_timeline(readers[key](chunks), RULES[key], order, start) for key in readers}
+    for v in out["individual_income_tax_slabs"]:
+        v.value_kind = "bands"
+    certified = _certified_dates()
+    for key, rs in relief_readings(chunks, order, certified).items():
+        out[key] = relief_versions(rs, order, start)
+    return out
+
+
+def _certified_dates() -> dict[str, date]:
+    from data_collection.sources import load_registry
+
+    return {d.document_id: d.certified_date for d in load_registry().documents}
 
 
 # --- scoring against the hand-verified versions -------------------------------------------
@@ -387,7 +439,17 @@ def _gold(ground_truth_dir: Path) -> dict[str, list[dict]]:
         )  # fmt: skip
         upper = int(r["upper_lkr"]) if r["upper_lkr"] else None
         v["value"].append([int(r["lower_lkr"]), upper, float(r["rate_percent"])])
-    return {"personal_relief": relief, "individual_income_tax_slabs": list(slabs.values())}
+    gold = {"personal_relief": relief, "individual_income_tax_slabs": list(slabs.values())}
+    extra = (
+        rows("relief_versions.csv") if (ground_truth_dir / "relief_versions.csv").exists() else []
+    )
+    for r in extra:  # the other Fifth Schedule para 2 reliefs
+        value = float(r["value"]) if r["value_kind"] == "rate" else int(r["value"])
+        gold.setdefault(r["rule_key"], []).append(
+            {"value": value, "valid_from": r["valid_from"], "valid_to": r["valid_to"] or None,
+             "source": r["source_document_id"], "status": r["status"]}
+        )  # fmt: skip
+    return gold
 
 
 def score(versions: dict[str, list[Version]], ground_truth_dir: Path) -> dict:
@@ -409,6 +471,7 @@ def score(versions: dict[str, list[Version]], ground_truth_dir: Path) -> dict:
                         ("valid_from", v["valid_from"] == g["valid_from"]),
                         ("valid_to", v["valid_to"] == g["valid_to"]),
                         ("source", v["source_document_id"] == g["source"]),
+                        ("status", v["status"] == g.get("status", v["status"])),
                     )
                     if not ok
                 ]
@@ -431,11 +494,16 @@ def score(versions: dict[str, list[Version]], ground_truth_dir: Path) -> dict:
 
 def _show(v: Version) -> str:
     to = v.valid_to.isoformat() if v.valid_to else "now       "
-    if isinstance(v.value, int):
+    if v.value_kind == "rate":
+        what = f"{v.value:g}% (of the base)"
+    elif v.value_kind == "cap":
+        what = f"up to Rs. {v.value:,}"
+    elif isinstance(v.value, int):
         what = f"Rs. {v.value:,}"
     else:
         what = ", ".join(f"{r:g}%" for _, _, r in v.value) + f"  ({len(v.value)} bands)"
-    return f"  {v.rule_id:26} {v.valid_from} .. {to}  {what:40} {v.source_document_id}"
+    return (f"  {v.rule_id:30} {v.valid_from} .. {to}  {what:40} {v.source_document_id:22} "
+            f"{v.status}")  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -459,10 +527,10 @@ def main(argv: list[str] | None = None) -> int:
     for key in RULES:
         r = result[key]
         bad = [f"V{c['version']}: {', '.join(c['wrong'])}" for c in r["checks"] if not c["exact"]]
-        print(f"{key:28} {r['exact']}/{r['gold_versions']} versions exact"
+        print(f"{key:32} {r['exact']}/{r['gold_versions']} versions exact"
               + (f"   wrong: {'; '.join(bad)}" if bad else ""))  # fmt: skip
     a = result["ALL"]
-    print(f"{'versioning accuracy':28} {a['exact']}/{a['gold_versions']} = {a['accuracy']:.2f}")
+    print(f"{'versioning accuracy':32} {a['exact']}/{a['gold_versions']} = {a['accuracy']:.2f}")
 
     args.out.mkdir(parents=True, exist_ok=True)
     payload = {k: [v.to_dict() for v in vs] for k, vs in versions.items()}

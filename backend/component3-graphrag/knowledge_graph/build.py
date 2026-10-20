@@ -88,9 +88,11 @@ _AMENDS_SCHEDULE = re.compile(r"Amendment\s+of\s+the\s+(" + "|".join(ORDINALS) +
                               re.I)  # fmt: skip
 
 
-def amended_provision(chunk: dict, leads: dict[tuple[str, str], str]) -> str | None:
+def amended_provision(chunk: dict, leads: dict[tuple[str, str], str],
+                      first_parts: dict[str, str] | None = None) -> str | None:  # fmt: skip
     """The 2017 provision an amendment chunk changes, from its marginal note
-    ("Amendment of section 52 ...") and, for a Schedule, the paragraph its text names."""
+    ("Amendment of section 52 ...") and, for a Schedule, the paragraph its text names (for a
+    continuation chunk "...-P2", the paragraph named in its first part)."""
     note = chunk.get("marginal_note") or ""
     m = _AMENDS_SECTION.search(note)
     if m:
@@ -99,9 +101,10 @@ def amended_provision(chunk: dict, leads: dict[tuple[str, str], str]) -> str | N
     if not m:
         return None
     lead = leads.get((chunk["document_id"], chunk["section"]), "")
-    para = re.search(r"\bparagraph\s+(\d+)", chunk["text"]) or re.search(
-        r"\bparagraph\s+(\d+)", lead
-    )
+    first = (first_parts or {}).get(re.sub(r"-P\d+$", "", chunk["chunk_id"]), "")
+    para = (re.search(r"\bparagraph\s+(\d+)", chunk["text"])
+            or re.search(r"\bparagraph\s+(\d+)", first)
+            or re.search(r"\bparagraph\s+(\d+)", lead))  # fmt: skip
     if not para:
         return None
     return _seg(PRINCIPAL, schedule=ORDINALS.index(m[1].lower()) + 1, paragraph=para[1])
@@ -119,6 +122,11 @@ def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents
         (c["document_id"], c["section"]): c["text"]
         for c in chunks
         if c.get("section") and c["chunk_id"].endswith("-0")
+    }
+    first_parts = {
+        c["chunk_id"].removesuffix("-P1"): c["text"]
+        for c in chunks
+        if c["chunk_id"].endswith("-P1")
     }
     rows: dict[str, list[dict]] = {k: [] for k in (
         "documents", "provisions", "chunks", "amends", "refers_to", "mentions",
@@ -147,7 +155,8 @@ def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents
                               "text")
         })  # fmt: skip
 
-        target = amended_provision(c, leads) if c["document_id"] != PRINCIPAL else None
+        target = (amended_provision(c, leads, first_parts) if c["document_id"] != PRINCIPAL
+                  else None)  # fmt: skip
         if target in known_segments:
             rows["amends"].append({"chunk_id": c["chunk_id"], "segment_id": target})
 
@@ -168,13 +177,17 @@ def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents
     for key, vs in versions.items():
         spec = RULES[key]
         rows["rules"].append({"rule_key": key, "rule_type": spec.rule_type, "title": spec.title,
-                              "provision": spec.provision})  # fmt: skip
+                              "provision": spec.provision, "limited_to": spec.limited_to,
+                              "conditions": spec.conditions})  # fmt: skip
         for v in vs:
             d = v.to_dict()
             rows["versions"].append({
                 "rule_id": v.rule_id, "rule_key": key, "version": v.version,
                 "valid_from": d["valid_from"], "valid_to": d["valid_to"], "status": v.status,
-                "amount": v.value if isinstance(v.value, int) else None,
+                "value_kind": v.value_kind,
+                "amount": v.value if v.value_kind == "amount" else None,
+                "cap": v.value if v.value_kind == "cap" else None,
+                "rate_percent": v.value if v.value_kind == "rate" else None,
                 "source_document_id": v.source_document_id,
                 "source_chunk_id": v.source_chunk_id, "matched_text": v.matched_text,
                 "income_types": list(spec.income_types),
@@ -185,7 +198,7 @@ def graph_rows(chunks: list[dict], versions: dict[str, list[Version]], documents
             ]
             if v.supersedes:
                 rows["supersedes"].append({"rule_id": v.rule_id, "previous": v.supersedes})
-            if not isinstance(v.value, int):
+            if v.value_kind == "bands":
                 rows["bands"] += [
                     {"rule_id": v.rule_id, "band_id": f"{v.rule_id}-B{i}", "order": i,
                      "lower": lo, "upper": up, "rate_percent": rate}

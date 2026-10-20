@@ -4,8 +4,9 @@
     python -m evaluation.retrieval --source files  # rebuilds the graph data from data/ (no Neo4j)
 
 Development set: ground_truth/retrieval_questions.csv -- everyday questions, each with an as-of date
-(24 answerable: both PP1 rules on dates in every version, including the first and last day of
-each version; 6 that the system must refuse). The correct answer for each question comes from
+(24 on personal relief and the tax bands, on dates in every version including the first and last
+day of each; 8 on the other Fifth Schedule reliefs; 8 that the system must refuse, two of them a
+relief asked about on a date it was not in force). The correct answer for each question comes from
 the hand-verified version tables in ground_truth/, never from the system. The development set
 was used while building retrieval; for an unbiased score, run once on questions written by
 people who have not seen the system:  --questions ground_truth/retrieval_questions_heldout.csv
@@ -50,11 +51,12 @@ ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth"]
 class GoldVersion:
     rule_key: str
     version: str
-    value: int | list[list]
+    value: int | float | list[list]
     valid_from: date
     valid_to: date | None
     document_id: str
     provision: str
+    kind: str = "amount"  # amount | cap | rate | bands
 
 
 @dataclass
@@ -110,7 +112,17 @@ def gold_versions(gt_dir: Path) -> list[GoldVersion]:
         )  # fmt: skip
         upper = int(r["upper_lkr"]) if r["upper_lkr"] else None
         g.value.append([int(r["lower_lkr"]), upper, float(r["rate_percent"])])
-    return out + list(bands.values())
+    for g in bands.values():
+        g.kind = "bands"
+    reliefs = [
+        GoldVersion(r["rule_key"], r["version"],
+                    float(r["value"]) if r["value_kind"] == "rate" else int(r["value"]),
+                    _d(r["valid_from"]), _d(r["valid_to"]), r["source_document_id"],
+                    r["source_provision"], r["value_kind"])
+        for r in (_rows(gt_dir / "relief_versions.csv")
+                  if (gt_dir / "relief_versions.csv").exists() else [])
+    ]  # fmt: skip
+    return out + list(bands.values()) + reliefs
 
 
 def load_questions(gt_dir: Path, path: Path | None = None) -> list[Question]:
@@ -162,6 +174,10 @@ def _rank_metrics(o: Outcome, right: set[str], other: set[str]) -> None:
 
 
 def _same_value(result, gold: GoldVersion) -> bool:
+    if gold.kind == "cap":
+        return result.values.cap is not None and result.values.cap.amount == gold.value
+    if gold.kind == "rate":
+        return result.values.rate_percent is not None and result.values.rate_percent == gold.value
     if isinstance(gold.value, int):
         return result.values.amount is not None and result.values.amount.amount == gold.value
     bands = [[b.lower, b.upper, float(b.rate_percent)] for b in result.values.bands or []]

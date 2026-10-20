@@ -41,7 +41,7 @@ OPTIONAL MATCH (v)-[:HAS_BAND]->(b:Band)
 WITH v, b ORDER BY b.`order`
 RETURN v.rule_id AS rule_id, v.rule_key AS rule_key, toString(v.valid_from) AS valid_from,
        toString(v.valid_to) AS valid_to, v.status AS status, v.amount AS amount,
-       v.source_document_id AS source,
+       v.cap AS cap, v.rate_percent AS rate_percent, v.source_document_id AS source,
        [x IN collect(b) | [x.lower, x.upper, x.rate_percent]] AS bands
 """
 KNOWN_DOCUMENTS = "MATCH (d:Document) RETURN d.document_id AS document_id"
@@ -64,6 +64,10 @@ class Change:
 def _value(v: dict) -> str:
     if v.get("amount") is not None:
         return f"Rs. {int(v['amount']):,}"
+    if v.get("cap") is not None:
+        return f"up to Rs. {int(v['cap']):,}"
+    if v.get("rate_percent") is not None:
+        return f"{float(v['rate_percent']):g}%"
     rates = [f"{float(b[2]):g}%" for b in v.get("bands") or []]
     return "/".join(rates) + f" ({len(rates)} bands)" if rates else "?"
 
@@ -83,8 +87,10 @@ def version_changes(before: list[dict], after: dict[str, list[Version]]) -> list
             new[v.rule_id] = {
                 "rule_id": v.rule_id, "rule_key": v.rule_key, "valid_from": d["valid_from"],
                 "valid_to": d["valid_to"], "status": v.status, "source": v.source_document_id,
-                "amount": v.value if isinstance(v.value, int) else None,
-                "bands": None if isinstance(v.value, int) else v.value,
+                "amount": v.value if v.value_kind == "amount" else None,
+                "cap": v.value if v.value_kind == "cap" else None,
+                "rate_percent": v.value if v.value_kind == "rate" else None,
+                "bands": v.value if v.value_kind == "bands" else None,
             }  # fmt: skip
     changes = []
     for rid, v in new.items():
