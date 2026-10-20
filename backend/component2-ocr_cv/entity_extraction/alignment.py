@@ -24,7 +24,7 @@ from dataclasses import replace
 from typing import Dict, List, Sequence, Tuple
 
 from entity_extraction.extractor import Candidate, Line, _amount_candidate, extract_fields, group_lines, split_amount
-from entity_extraction.fiscal import evaluate
+from entity_extraction.fiscal import RULES, evaluate
 
 MAX_FIELDS = 9                 # 3^9 = 19,683 pairings at most: fast enough on CPU
 PROPAGATED_FACTOR = 0.9        # inferred from neighbours, not checked by a rule itself
@@ -92,9 +92,16 @@ def realign(lines: List[Line], base: Dict[str, Candidate]) -> Tuple[Dict[str, Ca
         d = directions.pop()
         rows = [out[f].line_index for f in moved]
         lo, hi = min(rows), max(rows)
-        while lo - 1 >= 0 and _is_row(lines[lo - 1]):
+        # Fields in a hard rule that the arithmetic confirmed IN PLACE (e.g. gross) are anchors: the
+        # shift never spreads across them (a slip whose rows are all label+amount would otherwise
+        # shift everything, including the verified gross).
+        hard_fields = {f for r in RULES if r.hard for f in r.fields}
+        anchors = [base[f].line_index for f, (s, _) in zip(fields, best) if s == 0 and f in hard_fields]
+        floor = max([a for a in anchors if a < lo], default=-1)
+        ceil = min([a for a in anchors if a > hi], default=len(lines))
+        while lo - 1 > floor and _is_row(lines[lo - 1]):
             lo -= 1
-        while hi + 1 < len(lines) and _is_row(lines[hi + 1]):
+        while hi + 1 < ceil and _is_row(lines[hi + 1]):
             hi += 1
         for f in fields:
             if f in moved or not lo <= base[f].line_index <= hi:
