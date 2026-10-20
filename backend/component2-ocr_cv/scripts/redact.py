@@ -19,20 +19,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2  # noqa: E402
 
-from api.pipeline import blackout, choose_language, decode_upload  # noqa: E402
-from preprocessing import preprocess  # noqa: E402
-from privacy import mask_tokens  # noqa: E402
+from api.pipeline import analyse, blackout, decode_upload  # noqa: E402
 
 
 def redact(path: Path, out_dir: Path) -> Path:
     img, _ = decode_upload(path.read_bytes(), path.name)
-    res = preprocess(img)
-    tokens, lang, _ = choose_language(res.image)
-    _, report = mask_tokens(tokens)
-    boxes = [res.to_original_bbox(b) for b in report.regions]
+    # The full pipeline (not one OCR pass): when the first reading misses rows (e.g. a boxed
+    # header lost by thresholding) the self-checked second reading still finds the identifiers.
+    _, report, _ = analyse(img, path.stem)
+    privacy = report["privacy"]
+    boxes = privacy["boxes"]                      # already in original-image pixels
+    lang = report["ocr_language"]["used"]
     out = out_dir / f"{path.stem}_redacted.png"
     cv2.imwrite(str(out), blackout(img, boxes))
-    found = ", ".join(f"{k} {v}" for k, v in sorted(report.counts.items())) or "nothing found"
+    found = ", ".join(f"{k} {v}" for k, v in privacy["masked"].items()) or "nothing found"
     print(f"{path.name}: covered {len(boxes)} areas ({found}) -> {out}   [OCR language: {lang}]")
     return out
 
