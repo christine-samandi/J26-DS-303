@@ -134,7 +134,6 @@ def retrieval_client_from_env(env: Mapping[str, str]) -> MockRetrievalClient | H
 
 # C2's field names (contracts/schemas/ocr_output_schema.json v0.1) -> the names C1 uses
 C2_TO_C1_FIELDS = {"gross_income": "employment_income", "apit": "apit_paid"}
-OCR_LANGUAGES = ("sin", "tam", "eng")  # asked of C2 when installed there, in this order
 
 
 def _multipart(field: str, filename: str, data: bytes) -> tuple[bytes, str]:
@@ -171,7 +170,6 @@ class HttpOcrClient:
         self.uploads: dict[str, tuple[str, bytes]] = {}
         self.last: dict | None = None
         self.notes: list[str] = []
-        self._lang: str | None = None
 
     def add(self, filename: str, data: bytes) -> str:
         """Register an uploaded file; returns the document ref to put in the TaxRequest."""
@@ -179,27 +177,12 @@ class HttpOcrClient:
         self.uploads[ref] = (filename, data)
         return ref
 
-    def languages(self) -> str:
-        """The OCR languages C2 has installed, e.g. 'sin+tam+eng' (asked once via /health)."""
-        if self._lang is None:
-            req = urllib.request.Request(f"{self.base_url}/health")
-            health = json.loads(_http("C2", req, self.timeout_s))
-            installed = set(health.get("languages") or ())
-            chosen = [code for code in OCR_LANGUAGES if code in installed]
-            if not chosen:
-                raise ComponentUnavailable(
-                    f"C2 has none of the OCR languages {', '.join(OCR_LANGUAGES)} installed "
-                    f"({health.get('error') or health.get('status')})"
-                )
-            self._lang = "+".join(chosen)
-        return self._lang
-
     def _post(self, path: str, document: str) -> bytes:
         if document not in self.uploads:
             raise ComponentUnavailable(f"no uploaded file for document {document!r}")
         filename, data = self.uploads[document]
         body, content_type = _multipart("file", filename, data)
-        query = urllib.parse.urlencode({"lang": self.languages(), "doc_id": document})
+        query = urllib.parse.urlencode({"lang": "auto", "doc_id": document})
         req = urllib.request.Request(
             f"{self.base_url}{path}?{query}",
             data=body,

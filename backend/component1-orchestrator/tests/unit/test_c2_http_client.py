@@ -40,9 +40,9 @@ PAYSLIP = {
 
 
 class FakeC2:
-    """GET /health and POST /extract(/visual) on a free local port."""
+    """POST /extract(/visual) on a free local port."""
 
-    def __init__(self, answer=PAYSLIP, languages=("eng", "osd"), status=200):
+    def __init__(self, answer=PAYSLIP, status=200):
         calls = self.calls = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -51,9 +51,6 @@ class FakeC2:
                 self.send_header("Content-Type", ctype)
                 self.end_headers()
                 self.wfile.write(body)
-
-            def do_GET(self):  # noqa: N802
-                self._send(200, json.dumps({"status": "ok", "languages": list(languages)}).encode())
 
             def do_POST(self):  # noqa: N802
                 body = self.rfile.read(int(self.headers["Content-Length"]))
@@ -106,7 +103,7 @@ def test_monthly_payslip_is_mapped_and_annualised(fake_c2):
     assert len(client.notes) == 2 and "x 12" in client.notes[0]
 
     ((path, ctype, body),) = c2.calls
-    assert path.startswith("/extract?") and "lang=eng" in path  # only installed languages
+    assert path.startswith("/extract?") and "lang=auto" in path  # C2 detects the scripts
     assert ctype.startswith("multipart/form-data; boundary=")
     assert b'filename="SYN_payslip_clean.png"' in body and b"image bytes" in body
 
@@ -147,13 +144,6 @@ def test_c2_error_and_c2_down_fail_cleanly(fake_c2):
     request = request.model_copy(update={"documents": (down.add("p.png", b"x"),)})
     result = run(request, Deps(down, MockRetrievalClient(), MockAssuranceClient()))
     assert result.status == "failed" and "C2 is not reachable" in result.review_reasons[0]
-
-
-def test_no_supported_ocr_language_is_reported(fake_c2):
-    client, ref = _client(fake_c2(languages=("osd",)))
-    request = TaxRequest(request_id="req-0010", year_of_assessment="2025/26", documents=(ref,))
-    result = run(request, Deps(client, MockRetrievalClient(), MockAssuranceClient()))
-    assert result.status == "failed" and "none of the OCR languages" in result.review_reasons[0]
 
 
 def test_visual_returns_the_annotated_image(fake_c2):
