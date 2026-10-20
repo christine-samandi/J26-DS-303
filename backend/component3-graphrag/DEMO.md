@@ -97,3 +97,18 @@ RETURN r.title AS relief, v.rule_id, v.valid_from, v.valid_to, v.status, v.amoun
        v.rate_percent ORDER BY relief, v.valid_from
 ```
 
+## 6. Keeping up with new law: automatic, with safety checks
+
+The safety checks, run on the real Act's link:
+```bash
+python -m knowledge_graph.auto_update https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No_02-2025_E.pdf
+```
+On the full corpus it stops at check 3 ("already in the corpus"), which shows a duplicate is
+never added twice. Every check is also tested on the real Acts (tests/test_auto_update.py:
+a corpus without Act No. 2 of 2025 -> added; the 2017 Act or a web page -> held, nothing
+changed; Neo4j down -> held, everything put back).
+
+The change record (after step 2 above): `curl http://localhost:8003/notifications`.
+
+Honest framing: the check runs once a month, not in real time; a document that fails a check
+waits for the maintainer (`python -m data_collection.monitor --list`).

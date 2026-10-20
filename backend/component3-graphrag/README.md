@@ -122,6 +122,27 @@ python -m knowledge_graph.build --until 2025-01-01      # the graph as it was kn
 python -m knowledge_graph.update DOC-IRA-AMEND-02-2025  # new Act -> new versions + change report
 ```
 
+**Law monitor, automatic updates and notifications** (keeping the knowledge base current)
+```bash
+python -m data_collection.monitor              # check the IRD Acts page now; add what is safe
+python -m data_collection.monitor --every      # keep checking, once a month
+python -m data_collection.monitor --list       # what was found: added / held (with reason)
+python -m data_collection.monitor --retry URL  # run the checks again on a held document
+```
+1. The monitor finds an income tax PDF that is not in the corpus.
+2. `knowledge_graph.auto_update` adds it **by itself if all seven safety checks pass**: it is a
+   PDF; its cover page says "Inland Revenue (Amendment) Act, No. N of YYYY" (it is registered
+   from that); it is not already in the corpus; it parses without warnings; no rule version
+   disappears; every hand-verified version is still rebuilt exactly (only an open-ended version
+   may get an end date); all values are possible (amounts > 0, rates 0-100%, bands in order).
+   If any check fails, nothing changes (registry, files and graph are put back) and the
+   document is HELD with the reason in a maintainer notification.
+3. Added: the graph is updated, the API reloaded, and the change is recorded as a
+   `law_change` notification (GET /notifications) in plain words with the Act's sentence.
+
+Future improvement: deliver each change to the in-app inbox of the users whose saved
+calculations it affects, once the app has user accounts.
+
 **Phase 4: ask the graph (Neo4j running, graph built)**
 ```bash
 python -m retrieval_api.graph_backend "What personal relief can I claim?" --date 2024-06-01
@@ -171,6 +192,8 @@ curl -X POST http://localhost:8003/retrieve -H "Content-Type: application/json" 
 |---|---|---|
 | GET | `/health` | Liveness + current mode |
 | POST | `/retrieve` | Retrieval (body = `RetrievalRequest`, response = `RetrievalOutput`) |
+| POST | `/reload` | Re-read the graph after `knowledge_graph.update` |
+| GET | `/notifications` | Law-change notifications, newest first (`?audience=users\|admin&since=...`) |
 
 Invalid requests get `422` with the list of contract errors. Every response is validated
 against the output schema before it is sent.

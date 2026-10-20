@@ -10,11 +10,14 @@ What happens (the same pipeline as a full build, for one document):
 4. write only what changed: the new Act's provisions and chunks with their AMENDS / REFERS_TO
    links, and the rule versions (new ones added, changed ones updated, none deleted unless the
    new timeline no longer has them);
-5. print a change report: which versions were added or replaced, and their dates.
+5. print a change report: which versions were added or replaced, and their dates;
+6. keep it as a `law_change` record (GET /notifications on the API; see
+   c3_common.notifications). --no-notify skips this.
 
-Typical use: data_collection.discover spots a new amendment Act on the IRD site -> add it to
-corpus_sources.json -> download -> this command. The demo: build the graph as it was known
-before 2025 (python -m knowledge_graph.build --until 2025-01-01), then add Act No. 2 of 2025.
+Typical use: data_collection.monitor (scheduled) spots a new Act on the IRD site and notifies
+the admin -> the admin checks it, adds it to corpus_sources.json -> download -> this command.
+The demo: build the graph as it was known before 2025
+(python -m knowledge_graph.build --until 2025-01-01), then add Act No. 2 of 2025.
 """
 
 from __future__ import annotations
@@ -117,6 +120,74 @@ def version_changes(before: list[dict], after: dict[str, list[Version]]) -> list
     return sorted(changes, key=lambda c: (c.rule_id.rsplit("-V", 1)[0], c.rule_id))
 
 
+def _money(v: Version) -> str:
+    if v.value_kind == "cap":
+        return f"up to Rs. {int(v.value):,}"
+    if v.value_kind == "rate":
+        return f"{float(v.value):g}%"
+    if v.value_kind == "bands":
+        return "/".join(f"{float(b[2]):g}%" for b in v.value) + f" ({len(v.value)} bands)"
+    return f"Rs. {int(v.value):,}"
+
+
+def rule_changes(changes: list[Change], versions: dict[str, list[Version]]) -> list:
+    """The change report in plain words, one RuleChange per changed rule version."""
+    from c3_common.notifications import RuleChange
+
+    by_id = {v.rule_id: v for vs in versions.values() for v in vs}
+    out = []
+    for c in changes:
+        v = by_id.get(c.rule_id)
+        key = v.rule_key if v else c.rule_id
+        title = RULES[key].title if key in RULES else c.rule_id
+        if c.kind == "-" or v is None:
+            out.append(RuleChange(c.rule_id, key, title, "removed",
+                                  f"{title}: {c.rule_id} is no longer in the law"))  # fmt: skip
+            continue
+        since, until = v.valid_from.isoformat(), v.valid_to.isoformat() if v.valid_to else None
+        if c.kind == "+":
+            what = (
+                "new relief"
+                if v.version == 1 and RULES[key].rule_type == "relief"
+                else ("new rule" if v.version == 1 else "new version")
+            )
+            summary = f"{title}: {what}, {_money(v)}, from {since}" + (
+                f" to {until}" if until else ""
+            )
+            out.append(RuleChange(v.rule_id, key, title, "added", summary, since, until,
+                                  f'"{v.matched_text}"'))  # fmt: skip
+        elif v.status == "outdated":
+            out.append(RuleChange(v.rule_id, key, title, "ended",
+                                  f"{title}: withdrawn, it does not apply after {until}",
+                                  since, until, c.evidence))  # fmt: skip
+        elif v.status == "replaced":
+            out.append(RuleChange(v.rule_id, key, title, "replaced",
+                                  f"{title}: {_money(v)} now ends on {until}, replaced by "
+                                  f"{v.superseded_by}", since, until, c.evidence))  # fmt: skip
+        else:
+            out.append(RuleChange(v.rule_id, key, title, "changed", f"{title}: {c.detail}",
+                                  since, until, c.evidence))  # fmt: skip
+    return out
+
+
+def notify_law_change(new_documents: list, changes: list[Change],
+                      versions: dict[str, list[Version]]):  # fmt: skip
+    """Keep the change report as a notification for users (only if a rule changed)."""
+    from c3_common import notifications
+
+    items = rule_changes(changes, versions)
+    if not items:
+        return None
+    names = "; ".join(d.title for d in new_documents)
+    n = notifications.make(
+        "law_change", "users", f"Tax law updated: {names}",
+        f"{names} changed {len(items)} rule version(s). Calculations for the years concerned "
+        "may change: please recalculate.",
+        document_id=new_documents[0].document_id, url=new_documents[0].url, changes=items,
+    )  # fmt: skip
+    return notifications.add(n)
+
+
 def delta_rows(rows: dict, new_documents: set[str]) -> dict:
     """Only the new Acts' document-level rows, plus every rule row (they are few)."""
     chunk_ids = {c["chunk_id"] for c in rows["chunks"] if c["document_id"] in new_documents}
@@ -162,7 +233,11 @@ def _stage(n: int, title: str, step: bool) -> None:
     print(f"\n[{n}/{STAGES}] {title}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def apply_update(document_ids: list[str], *, skip_parse: bool = False, step: bool = False,
+                 notify: bool = True) -> list[Change]:  # fmt: skip
+    """Add these registered (and downloaded) Acts to the graph in Neo4j: parse, extract,
+    rebuild the timelines, write only what changed, report it and notify users.
+    Raises UpdateError when a document is missing; Neo4j errors propagate."""
     from collections import Counter
 
     from c3_common.config import get_settings
@@ -172,35 +247,29 @@ def main(argv: list[str] | None = None) -> int:
     from entity_recognition.extract import extract_corpus
     from knowledge_graph.connection import get_driver
 
-    parser = argparse.ArgumentParser(description="Add newly published Acts to the graph.")
-    parser.add_argument("documents", nargs="+", metavar="DOC_ID")
-    parser.add_argument("--skip-parse", action="store_true", help="the Act is already parsed")
-    parser.add_argument("--step", action="store_true", help="pause after each stage (for a demo)")
-    args = parser.parse_args(argv)
-
     settings = get_settings()
     registry = load_registry()
-    new_docs = [registry.get(doc_id) for doc_id in args.documents]
+    new_docs = [registry.get(doc_id) for doc_id in document_ids]
     if any(d.document_id == PRINCIPAL for d in new_docs):
-        print("The principal Act is the base of the graph: rebuild with knowledge_graph.build")
-        return 1
+        raise UpdateError("The principal Act is the base of the graph: rebuild with "
+                          "knowledge_graph.build")  # fmt: skip
     started = time.perf_counter()
     print("New Act: " + "; ".join(f"{d.title} (certified {d.certified_date})" for d in new_docs))
 
-    _stage(1, "Parse the PDF into its legal structure", args.step)
+    _stage(1, "Parse the PDF into its legal structure", step)
     for d in new_docs:
-        if args.skip_parse:
+        if skip_parse:
             print(f"  {d.document_id}: already parsed")
             continue
         parsed = parse_corpus(settings.raw_docs_dir, settings.processed_dir, d.document_id)
         if not parsed:
-            print(f"  {d.document_id} is not downloaded. Run: python -m data_collection.download")
-            return 1
+            raise UpdateError(f"{d.document_id} is not downloaded. Run: python -m "
+                              "data_collection.download")  # fmt: skip
         kinds = Counter(seg.kind for seg in parsed[0].segments)
         print(f"  {d.document_id}: {parsed[0].page_count} pages -> "
               + ", ".join(f"{n} {k.replace('_', ' ')}s" for k, n in kinds.items()))  # fmt: skip
 
-    _stage(2, "Extract tax entities (spaCy + regex, no LLM)", args.step)
+    _stage(2, "Extract tax entities (spaCy + regex, no LLM)", step)
     for d in new_docs:
         stats = extract_corpus(settings.processed_dir, settings.extracted_dir, d.document_id)
         top = sorted(stats["by_label"].items(), key=lambda x: -x[1])[:5]
@@ -210,11 +279,11 @@ def main(argv: list[str] | None = None) -> int:
     with get_driver() as driver:
         driver.verify_connectivity()
         known, _, _ = driver.execute_query(KNOWN_DOCUMENTS)
-        doc_ids = {r["document_id"] for r in known} | set(args.documents)
+        doc_ids = {r["document_id"] for r in known} | set(document_ids)
         before, _, _ = driver.execute_query(CURRENT_VERSIONS)
         before = [dict(r) for r in before]
 
-        _stage(3, "Rebuild the rule timelines with the new Act (versioning)", args.step)
+        _stage(3, "Rebuild the rule timelines with the new Act (versioning)", step)
         chunks = [c for c in load_extracted(settings.extracted_dir) if c["document_id"] in doc_ids]
         parsed = [c for c in load_chunks(settings.processed_dir) if c.document_id in doc_ids]
         versions = build_versions(parsed)
@@ -224,9 +293,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {RULES[key].title}: {len(vs)} versions"
                   + (f", {len(touched)} changed" if touched else ", unchanged"))  # fmt: skip
 
-        _stage(4, "Write the changes to Neo4j (only what is new)", args.step)
+        _stage(4, "Write the changes to Neo4j (only what is new)", step)
         documents = [d for d in registry.documents if d.document_id in doc_ids]
-        delta = delta_rows(graph_rows(chunks, versions, documents), set(args.documents))
+        delta = delta_rows(graph_rows(chunks, versions, documents), set(document_ids))
         removed = [c.rule_id for c in changes if c.kind == "-"]
         if removed:
             driver.execute_query(DROP_VERSIONS, ids=removed)
@@ -236,10 +305,34 @@ def main(argv: list[str] | None = None) -> int:
               f"+{len(delta['refers_to'])} REFERS_TO links; "
               f"{len(delta['versions'])} rule versions written")  # fmt: skip
 
-    _stage(5, "Change report", args.step)
+    _stage(5, "Change report", step)
     print(report(new_docs, delta, changes))
+    if notify:
+        note = notify_law_change(new_docs, changes, versions)
+        if note:
+            print(f"\nNotification {note.id} recorded for users (GET /notifications).")
     print(f"\nGraph updated in {time.perf_counter() - started:.1f} s. If the API is running, "
           "reload it: POST http://localhost:8003/reload")  # fmt: skip
+    return changes
+
+
+class UpdateError(RuntimeError):
+    """A document cannot be added (not registered, not downloaded, the principal Act)."""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Add newly published Acts to the graph.")
+    parser.add_argument("documents", nargs="+", metavar="DOC_ID")
+    parser.add_argument("--skip-parse", action="store_true", help="the Act is already parsed")
+    parser.add_argument("--step", action="store_true", help="pause after each stage (for a demo)")
+    parser.add_argument("--no-notify", action="store_true", help="do not record a notification")
+    args = parser.parse_args(argv)
+    try:
+        apply_update(args.documents, skip_parse=args.skip_parse, step=args.step,
+                     notify=not args.no_notify)  # fmt: skip
+    except UpdateError as e:
+        print(e)
+        return 1
     return 0
 
 

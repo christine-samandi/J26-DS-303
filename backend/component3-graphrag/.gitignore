@@ -4,4 +4,6 @@ data/processed/
 data/extracted/
 data/evaluation/
 data/graph/
+data/monitor/
+data/notifications/
 *.log
