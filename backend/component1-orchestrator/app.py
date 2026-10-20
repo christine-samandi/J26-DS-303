@@ -11,7 +11,7 @@ import os
 import random
 import re
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -38,9 +38,11 @@ from orchestrator.clients import (  # noqa: E402
     assurance_client_from_env,
 )
 from orchestrator.graph import run  # noqa: E402
+from orchestrator.law_updates import fetch_notifications, impacts  # noqa: E402
 from orchestrator.llm import explainer_llm_from_env  # noqa: E402
 from orchestrator.models import DocumentInput, OcrResult, TaxRequest  # noqa: E402
 from orchestrator.stages import Deps, doc_id  # noqa: E402
+from tax_calculation_agent.ruleset import RuleSetError, ya_period  # noqa: E402
 
 PAYSLIPS = {
     "Clean payslip": "payslip_clean",
@@ -277,6 +279,31 @@ def recalculate() -> None:
     st.session_state["recalc"] = True
 
 
+def law_updates_box(c3_url: str, show_impact: bool) -> None:
+    """C3's law-change notifications; warns when the last calculation used a rule that changed."""
+    try:
+        items = fetch_notifications(c3_url)
+    except ComponentUnavailable as e:
+        st.sidebar.caption(f"Law updates unavailable: {e}")
+        return
+    last = st.session_state.get("last_calc")
+    if show_impact and last:
+        newer = [n for n in items if datetime.fromisoformat(n["created_at"]) > last["at"]]
+        hits = impacts(newer, last["rule_ids"], last["as_of"])
+        if hits:
+            lines = "\n".join(f"- {md_escape(h.summary)}" for h in hits)
+            st.warning(
+                f"**The law changed after your last calculation** (YA {last['ya']}, made "
+                f"{last['at']:%H:%M}):\n{lines}\n\nPress **Calculate** again to use the new law."
+            )
+    if items:
+        with st.sidebar.expander(f"Law updates ({len(items)})"):
+            for n in items[:3]:
+                st.markdown(f"**{md_escape(n['title'])}** · {n['created_at'][:10]}")
+                for c in n.get("changes", [])[:8]:
+                    st.markdown(f"- {md_escape(c['summary'])}")
+
+
 def tampered_markdown(t: Tampering) -> list[str]:
     """The rejected rewrite, one line per step, with the changed figure and citation marked."""
     out = []
@@ -350,6 +377,7 @@ with st.sidebar:
     if live_c3:
         st.caption(f"C3 API: {c3_url}")
         year = st.selectbox("Year of assessment", LIVE_YEARS)
+        st.button("Check for law updates", help="Ask C3 whether the law changed (no calculation)")
     else:
         year = st.selectbox("Year of assessment", MOCK_YEARS)
         st.caption("Mock rules (C1 stand-in for C3)")
@@ -456,6 +484,9 @@ if go or recalc:
         show_boxes=show_boxes, live_c3=live_c3, c3_url=c3_url,
     )  # fmt: skip
 
+if live_c3:
+    law_updates_box(c3_url, show_impact=not (go or recalc))
+
 view = st.session_state.get("view")
 if view is None:
     st.info("Pick an input on the left and press **Calculate**.")
@@ -468,6 +499,17 @@ retrieval, assurance, llm, demo_tamper = (
     view[k] for k in ("retrieval", "assurance", "llm", "demo_tamper")
 )
 show_boxes, live_c3, c3_url = (view[k] for k in ("show_boxes", "live_c3", "c3_url"))
+
+if (go or recalc) and live_c3 and result.rules is not None:  # per run, for law-change check
+    try:
+        st.session_state["last_calc"] = {
+            "at": datetime.now(UTC),
+            "ya": year,
+            "as_of": ya_period(year)[0],
+            "rule_ids": set(rule_refs(result.rules, result.reliefs)),  # incl. reliefs
+        }  # fmt: skip
+    except RuleSetError:
+        pass
 
 # ---------------- UI: output ----------------
 STATUS_BOX.get(result.status, st.info)(
