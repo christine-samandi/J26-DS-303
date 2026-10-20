@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 TOL = 1.0   # rupees; rounding on payslips is to the cent, so 1 rupee is generous
+PRECISE_TOL = 0.05   # two amounts rounded separately from the same base differ by a few cents at most
 
 # Digit pairs that OCR commonly confuses in printed numbers.
 DIGIT_SWAPS = {"1": "7", "7": "1", "3": "8", "8": "3", "5": "6", "6": "5", "0": "8", "1": "4", "4": "1",
@@ -33,6 +34,7 @@ class Rule:
     hard: bool
     check: Callable[[Dict[str, float]], bool]
     text: str
+    precise: bool = False      # matches to the cent: one repaired precise rule is enough evidence
 
 
 def _eq(a: float, b: float) -> bool:
@@ -72,6 +74,11 @@ RULES: List[Rule] = [
          "employer EPF is 12% (or 15% at some employers) of EPF-liable earnings"),
     Rule("ETF = 3%", ("etf",), False, _rate_rule("etf", 0.03),
          "ETF is 3% of EPF-liable earnings"),
+    # Same base for both, so their RATIO is fixed (3/12 or 3/15) even when basic/COLA were not
+    # read: on a real slip this check alone repaired ETF read as 9,755.06 (true 5,755.06).
+    Rule("ETF = EPF employer x 3/12 or 3/15", ("etf", "epf_employer"), False,
+         lambda v: any(abs(v["etf"] - v["epf_employer"] * r) <= PRECISE_TOL for r in (3 / 12, 3 / 15)),
+         "ETF (3%) and employer EPF (12% or 15%) are calculated on the same earnings", precise=True),
 ]
 
 
@@ -131,6 +138,13 @@ def misreadings(value: float) -> List[Tuple[float, int]]:
     return [(v, 1) for v in sorted(out)]
 
 
+def _pairs(checks: List[CheckResult], base: List[CheckResult]):
+    """(trial check, base check, rule) for rules evaluated in both."""
+    by_name = {b.rule: b for b in base}
+    rules = {r.name: r for r in RULES}
+    return [(c, by_name[c.rule], rules[c.rule]) for c in checks if c.rule in by_name]
+
+
 def _score(checks: List[CheckResult]) -> Tuple[int, int]:
     return (sum(c.passed for c in checks if c.hard), sum(c.passed for c in checks if not c.hard))
 
@@ -157,7 +171,11 @@ def validate_and_correct(values: Dict[str, float], max_changes: int = 1) -> Fisc
                     trial[f] = v
                 checks = evaluate(trial)
                 hard, soft = _score(checks)
-                gain_ok = (hard > base_hard) or (soft - base_soft >= 2)
+                # A random wrong digit almost never matches a cent-precise rule, so repairing one
+                # precise rule is enough; ordinary soft rules (1-rupee tolerance) need two.
+                precise_gain = any(c.passed and not b.passed and r.precise
+                                   for c, b, r in _pairs(checks, base_checks))
+                gain_ok = (hard > base_hard) or (soft - base_soft >= 2) or (precise_gain and soft > base_soft)
                 if not gain_ok or hard < base_hard:
                     continue
                 key = (hard, soft, -k)

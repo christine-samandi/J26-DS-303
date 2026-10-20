@@ -90,3 +90,12 @@ def test_epf_on_basic_plus_cola_at_15_percent_passes():
 def test_sinhala_basic_salary_and_cola_labels():
     found = extract_fields(page([("'සමගාමි වැටුප", "179,045.79"), ("සී.එල්.ඒ. ගැලපීම", "12,789.50")]))
     assert found["basic_salary"].value == 179045.79 and found["cola"].value == 12789.50
+
+
+def test_etf_misread_digit_repaired_by_epf_ratio():
+    """Real case: ETF read as 9,755.06; basic/COLA not read. ETF = EPF employer x 3/15 repairs it."""
+    from entity_extraction.fiscal import validate_and_correct
+    rep = validate_and_correct({"gross_income": 460786.24, "total_deductions": 339605.42,
+                                "net_amount": 121180.82, "epf_employer": 28775.29, "etf": 9755.06})
+    assert rep.values["etf"] == 5755.06 and "etf" in rep.corrections
+    assert rep.values["epf_employer"] == 28775.29
