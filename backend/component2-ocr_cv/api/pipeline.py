@@ -11,6 +11,7 @@ Everything happens in memory; nothing is written to disk (NFR4).
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence, Tuple
@@ -133,6 +134,31 @@ def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
     raise ValueError(f"unknown engine '{engine}'")
 
 
+# --- Self-checked reading (own method) -------------------------------------------------------
+# Why: the binarised page (adaptive threshold + Tesseract 'single block' mode) is best for most
+# photos (PS_001: 6/6 vs 3/6), but on some slips it erases thin decimal points ('179,045.79' ->
+# '179,045 79') and drops boxed header rows entirely (so the NIC/name were never read, and never
+# masked). No single setting wins on every document, so the pipeline checks its own reading:
+# when the first reading looks broken it reads again from the greyscale page with layout analysis
+# (psm 4) and keeps whichever reading the tax arithmetic and amount format support better.
+MONEY_TOKEN = re.compile(r"^\d{1,3}(?:,\d{3})+(?:\.\d{2})?$|^\d+\.\d{2}$")
+GOOD_DECIMAL_SHARE = 0.5            # under half the amounts with '.dd' cents = decimal points lost
+ALT_PSM = 4                         # single column of variable-size text: keeps boxed header rows
+
+
+def reading_quality(tokens: Sequence, report: dict, n_fields: int) -> Tuple[int, int, float]:
+    """(hard checks passed, fields found, share of amounts with decimal cents): compared as a tuple."""
+    hard = sum(1 for c in report.get("checks", []) if c.get("hard") and c.get("passed"))
+    money = [t.text.strip(".,:;") for t in tokens if MONEY_TOKEN.match(t.text.strip(".,:;"))]
+    share = sum("." in m for m in money) / len(money) if money else 0.0
+    return hard, n_fields, round(share, 2)
+
+
+def looks_broken(quality: Tuple[int, int, float]) -> bool:
+    hard, _, share = quality
+    return hard == 0 or share < GOOD_DECIMAL_SHARE
+
+
 def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing: bool = True,
             engine: str = "tesseract", mask_pii: bool = True) -> Tuple[OCROutput, dict, Sequence]:
     """The whole pipeline for one image. Returns (contract output, explanation report, tokens used
@@ -179,6 +205,26 @@ def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing:
         tokens = guard(tess_tokens if tess_tokens is not None else read_tokens(page, engine, lang))
         out, report = extract_document(tokens, doc_id=doc_id, engine=ENGINE_LABELS.get(engine, engine),
                                       to_original=to_original)
+        if engine == "tesseract" and use_preprocessing and "threshold" in res.steps_applied:
+            first = reading_quality(tokens, report, len(out.extracted_fields))
+            reading = {"used": "binarised page", "first": first, "second": None,
+                       "reason": "first reading passed the self-check"}
+            if looks_broken(first):
+                # Same steps minus threshold: threshold does not move pixels, so boxes still map back.
+                grey = preprocess(img, steps=[st for st in res.steps_applied if st != "threshold"]).image
+                alt_tokens = guard(run_tesseract(grey, lang=lang, psm=ALT_PSM))
+                alt_out, alt_report = extract_document(alt_tokens, doc_id=doc_id,
+                                                       engine=ENGINE_LABELS.get(engine, engine),
+                                                       to_original=to_original)
+                second = reading_quality(alt_tokens, alt_report, len(alt_out.extracted_fields))
+                reading.update(second=second)
+                if second > first:
+                    tokens, out, report = alt_tokens, alt_out, alt_report
+                    reading.update(used="greyscale page (layout mode)",
+                                   reason="second reading passes more tax checks / keeps decimal points")
+                else:
+                    reading["reason"] = "second reading was not better; first kept"
+            report["reading"] = reading
     out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
     report["engine"] = engine
