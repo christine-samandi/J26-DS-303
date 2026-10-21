@@ -1,0 +1,17 @@
+{
+  "document_type": "invoice",
+  "issuer": "SUNLANKA SOLAR (PVT) LTD",
+  "document_number": "SL-2026-0142",
+  "document_date": "2026-08-14",
+  "seller_reg_no": "114567890-7000",
+  "subtotal": 850000.0,
+  "vat": 153000.0,
+  "total_amount": 1003000.0,
+  "amount_paid": 1003000.0,
+  "balance_due": 0.0,
+  "line_items": 4,
+  "attributes": {
+    "System Capacity": "5 kW",
+    "Grid Connection": "CEB Net Metering"
+  }
+}

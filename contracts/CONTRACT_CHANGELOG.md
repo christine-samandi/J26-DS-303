@@ -42,3 +42,12 @@ Any schema change must be reviewed by all components that depend on it.
   - **Why the template was shown.** `explanation.rewrite_status` (required) is `not_requested`, `failed`, `rejected` or `accepted`. `failed` means the LLM call itself raised (e.g. quota), so the skeleton text was shown but nothing was rejected; `rejected` means the rewrite failed C1's post-check (`used_fallback` true). The flags must agree with it. C4 can use it for an LLM failure rate in drift monitoring.
 - **Amended (2026-10-17, still v0.1.0, no version bump while a proposal):** added `explanation.rewrite_status`, the matching schema, and `"rewrite_status": "not_requested"` in the three examples.
 - **Review needed from:** De Zoysa K R D P (C4, consumer). For awareness: Elvitigala C S (C3, rule ids and citations) and Senevirathne R S N N (C2, `inputs[].source` and `document_id`).
+
+## ocr_output — v0.2 (additive)
+
+- **Date:** 2026-10-21
+- **Author:** Senevirathne R S N N (C2)
+- **Change:** `document_type` adds `quotation`. New field names: `document_number`, `due_date`, `seller_reg_no`, `subtotal`, `discount`, `amount_paid`, `balance_due`, `previous_balance`. Three new optional lists: `line_items` (description exactly as printed, quantity, unit, unit price, tax rate, amount, whether the amount includes tax), `tax_components` (VAT, SSCL, SGST ... with rate and amount) and `attributes` (printed key-value facts such as `System Size: 5 kW`). `schema_version` may be `"0.1"` or `"0.2"`. Mock: `mock_data/ocr_output_examples/invoice_solar_mock_01.json` (synthetic).
+- **Reason:** Supervisor asked for tax deductions/reliefs (e.g. a solar panel installation). C2 now reads invoices, receipts and quotations so C1/C3 can decide relief eligibility from the line items; C2 itself decides nothing about relief.
+- **Compatibility:** Payslips and bank statements still return `schema_version: "0.1"` with exactly the same fields, so C1's current check (`schema_version == "0.1"`, payslip only) keeps working. Invoices, receipts and quotations return `"0.2"`. A `quotation` is a price offer, not proof of spending.
+- **Review needed from:** Fernando W I C S (C1), Elvitigala C S (C3), De Zoysa K R D P (C4).

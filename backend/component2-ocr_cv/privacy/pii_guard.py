@@ -53,7 +53,10 @@ LABEL_RE = [(kind, re.compile(rf"^\W*({pat})\s*[:\-]?\s*$", re.I)) for kind, pat
 ADDRESS_LINE = re.compile(r"^\W*no\.?\s*\d+(/\d+)*|\b(road|rd|mawatha|lane|place|street|avenue|para|watta|junction|"
                           r"පාර|මාවත|வீதி)\b", re.I)
 KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|date|page|currency|lkr|"
-                        r"pay\s*slip|payslip|salary|department|balance|total)\b", re.I)
+                        r"pay\s*slip|payslip|salary|department|balance|total|"
+                        # document titles on purchase documents: 'TAX INVOICE' under a seller's address
+                        # is not a place name (it was masked, then every 'Invoice' label was masked too)
+                        r"invoice|receipt|quotation|estimate|tax|vat|donation)\b", re.I)
 
 
 @dataclass

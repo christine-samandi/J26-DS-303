@@ -104,8 +104,8 @@ def extract_document(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
                      processing_ms: Optional[int] = None,
                      to_original: Optional[Callable[[List[int]], List[int]]] = None) -> Tuple[OCROutput, dict]:
     """Classify first, then extract with the right extractor (FR8 before FR4).
-    Payslips and bank statements are extracted; invoices and receipts return their type with no fields
-    yet, and non-financial documents return 'unknown' - never forced into payslip fields."""
+    Payslips, bank statements, invoices, receipts and quotations are extracted; non-financial
+    documents return 'unknown' - never forced into payslip fields."""
     from document_classifier import classify_tokens
 
     cls = classify_tokens(tokens)
@@ -120,6 +120,14 @@ def extract_document(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
         from entity_extraction.bank_statement import extract_bank_statement
         out, report = extract_bank_statement(tokens, doc_id, engine=engine, processing_ms=processing_ms,
                                              to_original=to_original, languages=detect_languages(tokens))
+        report["classification"] = classification
+        return out, report
+
+    if cls.document_type in ("invoice", "receipt", "quotation"):
+        from entity_extraction.invoice import extract_invoice
+        out, report = extract_invoice(tokens, doc_id, engine=engine, processing_ms=processing_ms,
+                                      to_original=to_original, document_type=cls.document_type,
+                                      languages=detect_languages(tokens))
         report["classification"] = classification
         return out, report
 
