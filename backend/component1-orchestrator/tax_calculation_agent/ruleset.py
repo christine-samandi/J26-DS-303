@@ -5,6 +5,10 @@ local seed YAML (`rules/ya_YYYY_YY.yaml`), and `rules_from_retrieval` reads C3's
 `RetrievalOutput`. `rule_conflicts` compares the two field by field; a disagreement is
 surfaced, never silently resolved.
 
+Other reliefs (solar panels, rent, ...) are not in the RuleSet: they apply only when the
+taxpayer claims them. Each is a `ReliefRule`, from C3 (`relief_from_retrieval`) or from the
+seed file's `reliefs:` section (`load_seed_reliefs`), compared with `relief_conflicts`.
+
 All money and rates are `Decimal`, converted from the YAML text with `Decimal(str(value))`
 so no float ever enters the engine.
 """
@@ -26,6 +30,7 @@ SEED_SCHEMA = "c1-seed-rules/1"
 _YA_PATTERN = re.compile(r"^(\d{4})/(\d{2})$")
 
 RuleOrigin = Literal["seed", "c3"]
+ValueKind = Literal["amount", "cap", "rate"]
 RELIEF_KEY = "personal_relief"
 SLABS_KEY = "individual_income_tax_slabs"
 
@@ -96,6 +101,34 @@ class TaxBands(_Frozen):
         return self
 
 
+class ReliefRule(_Frozen):
+    """A relief other than personal relief, applied only when the taxpayer claims it.
+
+    `value_kind` is read from which structured value C3 set, never from the text:
+        amount  a fixed LKR amount
+        cap     up to `value` LKR, and not more than the amount the claim is based on
+        rate    `value` percent of the income the claim is based on
+    """
+
+    rule_key: str
+    title: str
+    value_kind: ValueKind
+    value: Decimal  # LKR for amount and cap, percent for rate
+    income_types: tuple[str, ...]  # income the relief applies to (C3 applies_to)
+    text: str | None = None  # C3's plain-language rule text, conditions included
+    ref: RuleRef
+
+    @model_validator(mode="after")
+    def _valid_value(self) -> ReliefRule:
+        if self.value < 0:
+            raise ValueError(f"{self.ref.rule_id}: relief value cannot be negative")
+        if self.value_kind == "rate" and self.value > 100:
+            raise ValueError(f"{self.ref.rule_id}: relief rate must be within 0..100")
+        if self.rule_key == RELIEF_KEY:
+            raise ValueError("personal relief is part of every RuleSet, not a claimed relief")
+        return self
+
+
 class RuleSet(_Frozen):
     """Everything the v1 engine needs for one YA: personal relief and the rate bands."""
 
@@ -124,14 +157,62 @@ def seed_file(year_of_assessment: str) -> Path:
 
 def load_seed_rules(year_of_assessment: str) -> RuleSet:
     """Load and check the local seed rules for a YA. Raises RuleSetError if anything is off."""
-    path = seed_file(year_of_assessment)
-    if not path.is_file():
-        raise RuleSetError(f"no seed rules for YA {year_of_assessment} ({path.name})")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path, data = _seed_data(year_of_assessment)
     try:
         return _build(data, year_of_assessment)
     except (KeyError, TypeError, ValueError) as e:
         raise RuleSetError(f"{path.name}: {e}") from e
+
+
+def load_seed_reliefs(year_of_assessment: str) -> tuple[ReliefRule, ...]:
+    """The seed file's other reliefs (its `reliefs:` section), each in force for the whole YA.
+
+    Used offline and to cross-check C3. A seed file without the section has none.
+    """
+    path, data = _seed_data(year_of_assessment)
+    start, end = ya_period(year_of_assessment)
+    try:
+        reliefs = []
+        for rule in data.get("reliefs") or ():
+            _check_in_force_for_ya(rule, start, end)
+            kind, value = _seed_value(rule)
+            reliefs.append(
+                ReliefRule(
+                    rule_key=rule["rule_key"],
+                    title=rule["title"],
+                    value_kind=kind,
+                    value=value,
+                    income_types=tuple(rule["applies_to"]["income_types"]),
+                    ref=_ref(rule),
+                )
+            )
+    except (KeyError, TypeError, ValueError) as e:
+        raise RuleSetError(f"{path.name}: {e}") from e
+    keys = [r.rule_key for r in reliefs]
+    if len(keys) != len(set(keys)):
+        raise RuleSetError(f"{path.name}: a relief is listed more than once")
+    return tuple(reliefs)
+
+
+def _seed_data(year_of_assessment: str) -> tuple[Path, dict]:
+    path = seed_file(year_of_assessment)
+    if not path.is_file():
+        raise RuleSetError(f"no seed rules for YA {year_of_assessment} ({path.name})")
+    return path, yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _seed_value(rule: dict) -> tuple[ValueKind, Decimal]:
+    """The one value a seed relief states, in the contract's RuleValues shape."""
+    values = rule["values"]
+    kinds = [k for k in ("amount", "cap", "rate_percent") if values.get(k) is not None]
+    if len(kinds) != 1 or set(values) - {"amount", "cap", "rate_percent"}:
+        raise RuleSetError(f"{rule['rule_id']} must state exactly one of amount, cap, rate_percent")
+    if kinds[0] == "rate_percent":
+        return "rate", _dec(values["rate_percent"])
+    money = values[kinds[0]]
+    if money["currency"] != "LKR":
+        raise RuleSetError(f"{rule['rule_id']} must be in LKR")
+    return kinds[0], _dec(money["amount"])
 
 
 def _build(data: dict, year_of_assessment: str) -> RuleSet:
@@ -244,6 +325,55 @@ def rules_from_retrieval(output: RetrievalOutput, year_of_assessment: str) -> Ru
         )
     except ValueError as e:  # includes pydantic's ValidationError
         raise RuleSetError(f"C3 rules for YA {year_of_assessment}: {e}") from e
+
+
+def relief_from_retrieval(rule: RetrievedRule) -> ReliefRule:
+    """One C3 relief result -> ReliefRule. The kind is whichever structured value C3 set.
+
+    Raises RuleSetError for anything the engine cannot apply: not a relief, personal relief
+    (that one is in every RuleSet), bands, no value or more than one value, not in LKR.
+    """
+    if rule.rule_type != "relief" or rule.rule_key is None:
+        raise RuleSetError(f"{rule.rule_id} is not a relief with a rule_key")
+    if rule.rule_key == RELIEF_KEY:
+        raise RuleSetError(f"{rule.rule_id} is personal relief, which every RuleSet already has")
+    v = rule.values
+    if v is None or v.bands is not None:
+        raise RuleSetError(f"{rule.rule_id} has no single structured value")
+    stated = [(k, x) for k, x in (("amount", v.amount), ("cap", v.cap)) if x is not None]
+    if v.rate_percent is not None:
+        stated.append(("rate", v.rate_percent))
+    if len(stated) != 1:
+        raise RuleSetError(f"{rule.rule_id} must state exactly one of amount, cap, rate_percent")
+    kind, x = stated[0]
+    if kind != "rate" and x.currency != "LKR":
+        raise RuleSetError(f"{rule.rule_id} must be in LKR")
+    try:
+        return ReliefRule(
+            rule_key=rule.rule_key,
+            title=rule.title,
+            value_kind=kind,
+            value=_dec(x if kind == "rate" else x.amount),
+            income_types=tuple(rule.applies_to.income_types),
+            text=rule.text,
+            ref=_c3_ref(rule),
+        )
+    except ValueError as e:  # includes pydantic's ValidationError
+        raise RuleSetError(f"C3 relief {rule.rule_id}: {e}") from e
+
+
+def relief_conflicts(seed: tuple[ReliefRule, ...], other: ReliefRule) -> list[str]:
+    """How a relief disagrees with the seed relief of the same rule_key. Empty = agrees, or
+    the seed has no such relief (then there is nothing to cross-check against)."""
+    mine = next((r for r in seed if r.rule_key == other.rule_key), None)
+    if mine is None:
+        return []
+    if (mine.value_kind, mine.value) != (other.value_kind, other.value):
+        return [
+            f"{other.rule_key}: seed {mine.value_kind} {mine.value}, "
+            f"{other.ref.origin} {other.value_kind} {other.value}"
+        ]
+    return []
 
 
 def rule_conflicts(seed: RuleSet, other: RuleSet) -> list[str]:

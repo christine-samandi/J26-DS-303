@@ -22,6 +22,9 @@ sources:
   - id: SRC-IRA-AMEND-45-2022
     title: Inland Revenue (Amendment) Act No. 45 of 2022
     note: Certified 19 December 2022
+  - id: SRC-IRA-AMEND-10-2021
+    title: Inland Revenue (Amendment) Act No. 10 of 2021
+    note: Certified 13 May 2021
 
 rules:
   - rule_id: SEED-PERSONAL_RELIEF-YA2024_25
@@ -66,3 +69,31 @@ rules:
       schedule: First Schedule
       paragraph: 1(1B)(b) and 1(1C)
       citation: Inland Revenue (Amendment) Act No. 45 of 2022, s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017
+
+# Reliefs applied only when the taxpayer claims them (e.g. with an invoice). Unlike `rules`,
+# these may start before the YA; each must cover the whole YA. Values follow RuleValues
+# (exactly one of amount / cap / rate_percent).
+# Solar panel relief is from C3's hand-verified ground truth
+# (component3-graphrag/ground_truth/relief_versions.csv: solar_panel_relief V1): Rs. 600,000
+# a YA, up to the cost of the panels; s.55(2)(e) is in Table A of Act No. 10 of 2021, deemed
+# operative 1 April 2021 by s.1(3); not amended later.
+reliefs:
+  - rule_id: SEED-SOLAR_RELIEF-YA2024_25
+    rule_key: solar_panel_relief
+    rule_type: relief
+    title: Solar panel relief
+    values:
+      cap:
+        amount: 600000
+        currency: LKR
+        period: year_of_assessment
+    applies_to:
+      income_types: [employment, business, investment, other]
+      taxpayer_categories: [resident_individual]
+    validity:
+      valid_from: 2021-04-01
+      valid_to: null
+    source:
+      source_ids: [SRC-IRA-AMEND-10-2021]
+      section: "55"
+      citation: Inland Revenue (Amendment) Act, No. 10 of 2021, s.55(2) (amending Fifth Schedule, paragraph 2(g) of Act No. 24 of 2017)
