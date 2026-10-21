@@ -190,8 +190,10 @@ def run_once(fetch=_fetch, state_path: Path = STATE_PATH, auto: bool = True,
     new = check(fetch, pages, keywords, state)
     for f in new:
         print(f"  NEW  {f.text or '(no text)'}\n       {f.url}")
-    if auto and new:
-        process(new, ingest)
+    if auto:  # the new ones, and any found earlier with --no-auto and not checked yet
+        todo = new + [f for f in state.pending if f.status == "new" and f not in new]
+        if todo:
+            process(todo, ingest)
     state.save(state_path)
     note = notify_admin(new)
     if note:

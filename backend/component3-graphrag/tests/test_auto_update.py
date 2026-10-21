@@ -90,19 +90,19 @@ def test_a_new_act_that_passes_every_check_is_added(env):
     assert NEW_ID in read_manifest(env / "raw")
 
 
-@pytest.mark.parametrize(
-    "content, reason",
-    [
-        (b"<html>Not found</html>", "did not return a PDF"),
-        ("principal", "not an Inland Revenue (Amendment) Act"),  # the 2017 Act itself
-    ],
-)
-def test_a_wrong_document_changes_nothing(env, content, reason):
-    if content == "principal":
-        content = (RAW / "IRA_24_2017_E.pdf").read_bytes()
+def test_a_page_that_is_not_a_pdf_is_held_and_changes_nothing(env):
     before = _snapshot(env)
-    out = ingest(URL, lambda url: content, apply=lambda ids: pytest.fail("must not write"))
-    assert out.status == "held" and reason in out.reason
+    out = ingest(URL, lambda url: b"<html>Not found</html>",
+                 apply=lambda ids: pytest.fail("must not write"))  # fmt: skip
+    assert out.status == "held" and "did not return a PDF" in out.reason
+    assert _snapshot(env) == before
+
+
+def test_a_document_that_is_not_new_law_is_skipped(env):
+    principal = (RAW / "IRA_24_2017_E.pdf").read_bytes()  # an Act, but not an amendment
+    before = _snapshot(env)
+    out = ingest(URL, lambda url: principal, apply=lambda ids: pytest.fail("must not write"))
+    assert out.status == "skipped" and "not an Inland Revenue (Amendment) Act" in out.reason
     assert _snapshot(env) == before
 
 
@@ -123,6 +123,17 @@ def test_graph_down_means_everything_is_put_back(env):
     assert out.status == "held" and "graph could not be updated" in out.reason
     assert _snapshot(env) == before  # registry, manifest and files exactly as before
     assert NEW_ID not in {d.document_id for d in load_registry().documents}
+
+
+def test_only_amendments_of_the_2017_act_count():
+    from knowledge_graph.auto_update import amends_current_act
+
+    assert amends_current_act(
+        "L.D.-O. 82/2024 An Act To Amend The Inland Revenue Act, No. 24 Of\n2017"
+    )
+    assert not amends_current_act("AN ACT TO AMEND THE INLAND REVENUE ACT, NO. 10 OF 2006")
+    with pytest.raises(Exception, match="before the current Act"):  # e.g. No. 10 of 2007
+        identify("INLAND REVENUE (AMENDMENT) ACT, No. 10 OF 2007", "2007-03-30")
 
 
 def test_cover_page_identifies_the_act():

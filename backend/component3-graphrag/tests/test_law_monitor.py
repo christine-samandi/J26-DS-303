@@ -59,6 +59,22 @@ def test_report_only_mode_notifies_the_maintainer_and_keeps_its_state(tmp_path):
     assert monitor.run_once(_fetch, path, auto=False) == [] and len(notifications.load()) == 1
 
 
+def test_documents_found_in_report_only_mode_are_checked_on_the_next_run(tmp_path):
+    from knowledge_graph.auto_update import Outcome
+
+    path = tmp_path / "state.json"
+    monitor.run_once(_fetch, path, auto=False)
+    seen = []
+
+    def skip(url):
+        seen.append(url)
+        return Outcome("skipped", "amends the Inland Revenue Act No. 10 of 2006")
+
+    assert monitor.run_once(_fetch, path, ingest=skip) == []  # nothing new on the page...
+    assert seen == [NEW]  # ...but the one found earlier is checked now
+    assert monitor.State.load(path).pending[0].status == "skipped"
+
+
 def test_new_documents_go_through_the_automatic_update(tmp_path):
     from knowledge_graph.auto_update import Outcome
 

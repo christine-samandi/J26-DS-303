@@ -2,13 +2,18 @@
 but only when it passes every safety check. Nobody has to check it by hand.
 
 The checks replace the person: each one stops a way a document could make the tax answers
-wrong. If any check fails, NOTHING changes (the registry, the files and the graph stay as they
-were, so the old law keeps answering) and the reason is recorded for the maintainer.
+wrong. A document that is not an amendment of the current Act (a guide, a consolidated text,
+an Act amending the old Inland Revenue Act No. 10 of 2006, ...) is SKIPPED: it is not new law
+for the graph. If any later check fails, NOTHING changes (the registry, the files and the
+graph stay as they were, so the old law keeps answering) and the document is HELD with the
+reason for the maintainer.
 
     1  is a PDF                     the link really returned a PDF
-    2  is an income tax Act         the cover page says "Inland Revenue (Amendment) Act, No. N
-                                    of YYYY" and has a certified date (not VAT, not a gazette,
-                                    not a Sinhala or Tamil copy)
+    2  amends the current Act       the cover page says "Inland Revenue (Amendment) Act, No. N
+                                    of YYYY", it is certified after the 2017 Act, and its long
+                                    title says "An Act to amend the Inland Revenue Act, No. 24
+                                    of 2017" (not VAT, not a guide, not the 2006 Act's
+                                    amendments, not a Sinhala or Tamil copy) -- else skipped
     3  not already in the corpus    the same Act under another link is skipped
     4  reads correctly              the parser finds its sections, without warnings
     5  no rule disappears           every rule version in the graph is still in the timeline
@@ -51,11 +56,36 @@ class Held(Exception):
     """A safety check failed: the document is not added."""
 
 
+class NotCurrentLaw(Exception):
+    """Not an amendment of the Inland Revenue Act No. 24 of 2017: nothing to add."""
+
+
+PRINCIPAL_CERTIFIED = date(2017, 10, 24)
+_AMENDS_2017 = re.compile(
+    r"act\s+to\s+amend\s+the\s+inland\s+revenue\s+act,?\s+no\.?\s*24\s+of\s+2017", re.I
+)
+
+
+def amends_current_act(first_pages: str) -> bool:
+    """The long title on the first pages: "An Act to amend the Inland Revenue Act, No. 24 of
+    2017" (every amendment Act in the corpus has it)."""
+    return bool(_AMENDS_2017.search(" ".join(first_pages.split())))
+
+
+def _first_pages(pdf: Path, n: int = 3) -> str:
+    import pymupdf
+
+    with pymupdf.open(pdf) as doc:
+        return " ".join(doc[i].get_text() for i in range(min(n, len(doc))))
+
+
 def identify(title: str | None, certified: str | None) -> tuple[str, str, str, str]:
     """(document_id, title, act_number, filename) from the cover page, or Held."""
     m = _TITLE.search((title or "").upper())
     if not m or not certified:
-        raise Held(f"not an Inland Revenue (Amendment) Act (cover page: {title!r})")
+        raise NotCurrentLaw(f"not an Inland Revenue (Amendment) Act (cover page: {title!r})")
+    if date.fromisoformat(certified) <= PRINCIPAL_CERTIFIED:
+        raise NotCurrentLaw(f"certified {certified}, before the current Act (No. 24 of 2017)")
     number, year = int(m[1]), m[2]
     return (f"DOC-IRA-AMEND-{number:02d}-{year}",
             f"Inland Revenue (Amendment) Act, No. {number} of {year}", f"{number} of {year}",
@@ -157,7 +187,9 @@ def ingest(url: str, fetch_bytes, apply=None, reload=None, now: datetime | None 
         doc_id, title, act_number, filename = identify(parsed.title_detected,
                                                        parsed.certified_date_detected)  # fmt: skip
         out.document_id = doc_id
-        out.checks.append(f"2 is an income tax Act: {title}")
+        if not amends_current_act(_first_pages(tmp)):
+            raise NotCurrentLaw(f"{title} does not amend the Inland Revenue Act, No. 24 of 2017")
+        out.checks.append(f"2 amends the current Act: {title}")
         if doc_id in {d.document_id for d in load_registry().documents}:
             out.status, out.reason = "skipped", f"{title} is already in the corpus"
             return out
@@ -215,6 +247,9 @@ def ingest(url: str, fetch_bytes, apply=None, reload=None, now: datetime | None 
         out.reason = f"{title}: {out.changes} rule version(s) changed"
         if reload:
             reload()
+        return out
+    except NotCurrentLaw as e:  # nothing was registered yet: just skip it
+        out.status, out.reason = "skipped", str(e)
         return out
     except Exception as e:  # a failed check (Held) or anything unexpected: change nothing
         out.status = "held"
