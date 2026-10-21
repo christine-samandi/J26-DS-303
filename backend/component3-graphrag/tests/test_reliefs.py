@@ -240,3 +240,30 @@ def test_component1_query_still_gets_exactly_personal_relief_and_bands(data):
         rule_types=["relief", "tax_slab"],
     )
     assert {r.rule_key for r in out.results} == {"personal_relief", "individual_income_tax_slabs"}
+
+
+@pytest.mark.parametrize(
+    "question, day, rule_id",
+    [  # everyday wording (found with the plain-language stress test)
+        ("How much can I earn without paying any tax this year?", "2025-06-01",
+         "RULE-PERSONAL_RELIEF-V4"),
+        ("My father is 65 and earns FD interest. Was there a relief for him in 2019?",
+         "2019-06-01", "RULE-SENIOR_CITIZEN_RELIEF-V1"),
+        ("I work freelance for a US company and get paid in dollars. Any relief in 2019?",
+         "2019-06-01", "RULE-FOREIGN_SERVICE_RELIEF-V1"),
+    ],
+)  # fmt: skip
+def test_plain_words_find_the_relief(data, question, day, rule_id):
+    assert _ask(data, question, day).results[0].rule_id == rule_id
+
+
+def test_working_for_a_company_is_still_a_question_about_an_individual(data):
+    assert _ask(data, "I am employed at a software company. What are my tax bands?").results
+    for question in ("What is the income tax rate for companies?", "How much tax does my "
+                     "company pay?", "Tax rate for a partnership?"):  # fmt: skip
+        assert _ask(data, question).results == [], question
+
+
+def test_a_relief_is_returned_only_when_the_question_asks_about_one(data):
+    out = _ask(data, "What is the tax on lottery winnings?")
+    assert not any(r.rule_type == "relief" for r in out.results)
