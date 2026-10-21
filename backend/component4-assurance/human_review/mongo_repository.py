@@ -15,6 +15,11 @@ from human_review.repository import (
     DuplicateReviewCaseError,
     ReviewCaseNotFoundError,
 )
+from human_review.audit import (
+    AuditEventType,
+    ReviewAuditEvent,
+    create_audit_event,
+)
 
 
 class MongoReviewCaseRepository:
@@ -24,27 +29,45 @@ class MongoReviewCaseRepository:
         self.collection = collection
         self.case_adapter = TypeAdapter(ReviewCase)
         self.feedback_adapter = TypeAdapter(ReviewFeedback)
+        self.audit_adapter = TypeAdapter(ReviewAuditEvent)
+
 
     def _to_document(self, case: ReviewCase) -> dict:
-        """Convert a ReviewCase into a MongoDB-compatible document."""
+        """Convert a new review case into a MongoDB document."""
 
         document = self.case_adapter.dump_python(
             case,
             mode="json",
         )
 
-        # Use the review case ID as MongoDB's unique primary key.
         document["_id"] = case.case_id
+
+        # Record the initial event when the case is created.
+        created_event = create_audit_event(
+            case_id=case.case_id,
+            event_type=AuditEventType.CASE_CREATED,
+        )
+
+        document["events"] = [
+            self.audit_adapter.dump_python(
+                created_event,
+                mode="json",
+            )
+        ]
+
         return document
 
+
     def _to_case(self, document: dict) -> ReviewCase:
-        """Convert a MongoDB document back into a ReviewCase."""
+        """Convert MongoDB data into the review-case model."""
 
         data = dict(document)
+
         data.pop("_id", None)
+        data.pop("events", None)
 
         return self.case_adapter.validate_python(data)
-
+    
     def add_case(self, case: ReviewCase) -> ReviewCase:
         """Save a newly created human review case."""
 
@@ -91,8 +114,19 @@ class MongoReviewCaseRepository:
             for document in documents
         )
 
+    
     def start_review(self, case_id: str) -> ReviewCase:
-        """Move a pending case into review."""
+        """Start a review and record the transition event."""
+
+        event = create_audit_event(
+            case_id=case_id,
+            event_type=AuditEventType.REVIEW_STARTED,
+        )
+
+        event_document = self.audit_adapter.dump_python(
+            event,
+            mode="json",
+        )
 
         document = self.collection.find_one_and_update(
             {
@@ -101,8 +135,11 @@ class MongoReviewCaseRepository:
             },
             {
                 "$set": {
-                    "status": ReviewCaseStatus.IN_REVIEW.value
-                }
+                    "status": ReviewCaseStatus.IN_REVIEW.value,
+                },
+                "$push": {
+                    "events": event_document,
+                },
             },
             return_document=ReturnDocument.AFTER,
         )
@@ -114,6 +151,7 @@ class MongoReviewCaseRepository:
             )
 
         return self._to_case(document)
+
 
     def complete_review(
         self,
@@ -145,6 +183,19 @@ class MongoReviewCaseRepository:
             mode="json",
         )
 
+        # Record the reviewer's final decision as an audit event.
+        event = create_audit_event(
+            case_id=case_id,
+            event_type=AuditEventType.REVIEW_COMPLETED,
+            actor_id=feedback.reviewer_id,
+            decision=feedback.decision,
+        )
+
+        event_document = self.audit_adapter.dump_python(
+            event,
+            mode="json",
+        )
+
         document = self.collection.find_one_and_update(
             {
                 "_id": case_id,
@@ -154,7 +205,10 @@ class MongoReviewCaseRepository:
                 "$set": {
                     "status": ReviewCaseStatus.COMPLETED.value,
                     "feedback": feedback_document,
-                }
+                },
+                "$push": {
+                    "events": event_document,
+                },
             },
             return_document=ReturnDocument.AFTER,
         )
@@ -166,3 +220,26 @@ class MongoReviewCaseRepository:
             )
 
         return self._to_case(document)
+
+    def get_history(
+        self,
+        case_id: str,
+    ) -> tuple[ReviewAuditEvent, ...]:
+        """Retrieve the stored event history of a review case."""
+
+        document = self.collection.find_one(
+            {"_id": case_id},
+            {"events": 1},
+        )
+
+        if document is None:
+            raise ReviewCaseNotFoundError(
+                f"Review case {case_id} was not found."
+            )
+
+        events = document.get("events", [])
+
+        return tuple(
+            self.audit_adapter.validate_python(event)
+            for event in events
+        )
