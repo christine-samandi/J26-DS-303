@@ -42,6 +42,8 @@ BANKS = [
     ("Regional Development Bank", ["regional", "development"]), ("Standard Chartered Bank", ["standard", "chartered"]),
     ("HSBC", ["hsbc"]), ("Bank of Ceylon", ["bank", "ceylon"]),
 ]
+# Company registration numbers printed under the bank's name on its statements
+BANK_REG_NOS = {"pq116": "Commercial Bank of Ceylon PLC"}
 BANK_NAME = re.compile(r"\b(bank|plc|ceylon|sampath|hnb|hatton|seylan|ndb|dfcc|nsb|nations trust|people'?s)\b", re.I)
 LABELS = {
     "opening": re.compile(r"\b(opening balance|balance brought forward|brought forward|b\s*/\s*f|balance as (of|at))\b", re.I),
@@ -125,7 +127,8 @@ def _word_hit(word: str, tokens) -> Optional[object]:
         w = re.sub(r"[^a-z]", "", t.text.lower())
         if not w:
             continue
-        if (w == word) if len(word) <= 4 else (SequenceMatcher(None, w, word).ratio() >= 0.8 or w.startswith(word)):
+        short = (w == word) or (len(w) >= 3 and word.startswith(w))      # 'Ban' for 'Bank' (cut-off letter)
+        if short if len(word) <= 4 else (SequenceMatcher(None, w, word).ratio() >= 0.8 or w.startswith(word)):
             return t
     return None
 
@@ -149,7 +152,20 @@ def _find_issuer(lines: List[Line]):
             hits = [_word_hit(w, near) for w in need]
             if all(hits):
                 return name, Line(hits), "stamp"
+    # Registration number printed under the name ('Reg.No.: PQ116') identifies the bank on its own
+    for ln in lines[: max(8, len(lines) // 3)]:
+        compact = re.sub(r"[^a-z0-9]", "", ln.text.lower())
+        for reg, name in BANK_REG_NOS.items():
+            if reg in compact:
+                return name, ln, "registration number"
     name, ln = _find_issuer_line(lines)
+    if name:
+        from difflib import SequenceMatcher
+        # never return the raw OCR line ('Soe COMMERCIAL Ban OF CeVLON Plc'): map it to the official name
+        best = max(BANKS, key=lambda b: SequenceMatcher(None, name.lower(), b[0].lower()).ratio())
+        if SequenceMatcher(None, name.lower(), best[0].lower()).ratio() >= 0.6:
+            return best[0], ln, "header (closest bank name)"
+        return None, None, "header"
     return name, ln, "header"
 
 
@@ -162,6 +178,18 @@ def _find_issuer_line(lines: List[Line]):
             if best is None or key > best[0]:
                 best = (key, text, ln)
     return (best[1], best[2]) if best else (None, None)
+
+
+DATE_TOKEN = re.compile(r"\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}|\d{1,2}(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\d{2}|"
+                        r"^\d{6}$", re.I)
+
+
+def date_tokens(ln: Line) -> list:
+    """Just the tokens of the date, never the rest of the line: a header line can also hold the
+    account holder's name ('MR J T MITHUM  Date : 10/21/25'), and a misread name escapes the PII
+    guard - returning the whole line as raw_text leaked it (BS_003)."""
+    toks = [t for t in ln.tokens if DATE_TOKEN.search(t.text.strip(":|!/\\"))]
+    return toks[:1] or [t for t in ln.tokens if any(ch.isdigit() for ch in t.text)][:3] or ln.tokens[:1]
 
 
 def _find_date(lines: List[Line]):
@@ -195,12 +223,21 @@ def _transactions(lines: List[Line]):
     """Table rows that start with a transaction date (310725 or 29JUL24) and end with an amount;
     returns [(date, [amounts...], line)] in page order, up to 'END OF STATEMENT' / closing line."""
     rows = []
-    for ln in lines:
+    for k, ln in enumerate(lines):
         if END.search(ln.text):
             break
         m = TXN_DATE.match(ln.text)
         if not m:
             continue
+        if not split_amount(ln)[1]:
+            # 'date + description' without amounts: the amounts were read as their own line just above
+            # or below ('5.00 26.93' / '200825 ATM SERVICE CHARGE'); join them back into one row
+            for j in (k - 1, k + 1):
+                if 0 <= j < len(lines) and not TXN_DATE.match(lines[j].text) and not END.search(lines[j].text):
+                    lab, amt = split_amount(lines[j])
+                    if amt and not any(ch.isalpha() for ch in " ".join(t.text for t in lab)):
+                        ln = Line(sorted(ln.tokens + lines[j].tokens, key=lambda t: t.bbox[0]))
+                        break
         try:
             if m[1]:
                 d = date(2000 + int(m[3]), int(m[2]), int(m[1]))
@@ -314,7 +351,8 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
 
     issuer, iln, where = _find_issuer(lines)
     if issuer:
-        add("issuer", issuer, iln.text, _conf(iln.tokens) * (1.0 if where == "header" else 0.85), iln.tokens)
+        bank_toks = [t for t in iln.tokens if "\u25cf" not in t.text] or iln.tokens
+        add("issuer", issuer, issuer, _conf(bank_toks) * (1.0 if where == "header" else 0.85), bank_toks)
         notes["issuer"] = [f"bank identified from its name words in the {where} (list of Sri Lankan banks)"]
     d, dln = _find_date(lines)
     date_note = None
@@ -325,16 +363,18 @@ def extract_bank_statement(tokens: Sequence, doc_id: str, engine: str = "tessera
                 dln, date_note = ln, "statement date taken from the closing-balance row (header date unreadable)"
                 break
     if d:
-        add("document_date", d.isoformat(), dln.text, _conf(dln.tokens) * (0.9 if date_note else 1.0), dln.tokens)
+        dt = date_tokens(dln)
+        add("document_date", d.isoformat(), " ".join(t.text for t in dt), _conf(dt) * (0.9 if date_note else 1.0), dt)
         if date_note:
             notes["document_date"] = [date_note]
     if txns:
         # The statement covers the transactions, which can be months before the print date.
         last_d, _, tln = txns[-1]
-        add("pay_period", f"{last_d.year}-{last_d.month:02d}", tln.text, _conf(tln.tokens[:1]) * 0.9, tln.tokens[:1])
+        add("pay_period", f"{last_d.year}-{last_d.month:02d}", tln.tokens[0].text, _conf(tln.tokens[:1]) * 0.9, tln.tokens[:1])
         notes["pay_period"] = ["statement month taken from the last transaction date"]
     elif d:
-        add("pay_period", f"{d.year}-{d.month:02d}", dln.text, _conf(dln.tokens) * 0.9, dln.tokens)
+        dt = date_tokens(dln)
+        add("pay_period", f"{d.year}-{d.month:02d}", " ".join(t.text for t in dt), _conf(dt) * 0.9, dt)
         notes["pay_period"] = ["statement month taken from the statement date"]
     if "closing" in found:
         _, p, toks = found["closing"]
