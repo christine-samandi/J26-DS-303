@@ -2,8 +2,11 @@
 
 1. `template_lines`: one line per CalcStep, built deterministically. Numbers come from the
    engine; citations are tags naming the rule_id, e.g. "[SEED-PERSONAL_RELIEF-YA2025_26]".
+   A capped relief (solar) also states the yearly limit and the amount paid, and keeps the
+   engine's note of where that amount came from ("amount confirmed by the user").
 2. The LLM rewrites each line in plain English. It sees only those lines (figures and rule
-   ids, no PII) and must not add, drop or change a number or a tag.
+   ids), redacted by `pii` first, and must not add, drop or change a number or a tag. Its
+   reply is restored before the post-check, so the check sees the same text as without it.
 3. `post_check.check` rejects a rewrite that breaks this; the template lines are used instead.
 4. Tags are rendered as the rule's human citation for display.
 
@@ -19,9 +22,11 @@ from typing import Protocol
 
 from explanation_agent.models import Claim, Explanation, LlmCall, RewriteStatus
 from explanation_agent.post_check import TAG, check
+from pii import redact, restore
 from tax_calculation_agent.engine import CalcStep
 
-PROMPT_VERSION = "explain-v2"  # v2: "%" and no number words
+# v2: "%" and no number words; v3: the result comes last; v4: keep where an amount came from
+PROMPT_VERSION = "explain-v4"
 PROMPT_TEMPLATE = """\
 You explain a Sri Lankan income tax calculation to a taxpayer who is not a tax expert.
 Below is one line per calculation step, as JSON. Rewrite each line in plain, friendly English,
@@ -31,9 +36,14 @@ Rules you must follow:
 - Keep every number exactly as it is. Do not add, remove, round or recompute any number.
 - Write numbers only in digits and percentages only with "%". Never use number words such as
   "one", "zero", "twenty", "million" or "percent", even in phrases like "no one".
+- End each line with the step's result, the figure after "Rs." at the end of its input line.
+  No other number may come after it; only the citation tags may follow.
 - Keep every citation tag in square brackets, such as [RULE-ID], exactly as written and on
   the same line. Do not add any other square-bracket tags.
 - Keep one line per step, with the same step_id, in the same order.
+- Keep where an amount came from: if a line says the amount was confirmed by the user, say
+  that the taxpayer confirmed it (for example "the amount you confirmed"). Never say an
+  amount was read or scanned from a document unless the line says so.
 
 Steps:
 {steps}
@@ -57,6 +67,7 @@ class ExplainOutcome:
     explanation: Explanation
     llm_call: LlmCall | None  # None when no LLM was configured or the call itself failed
     warnings: tuple[str, ...] = ()
+    pii_redacted: int = 0  # distinct values replaced in the prompt; 0 when nothing was sent
 
 
 def template_lines(steps: Sequence[CalcStep], rules_used: Mapping[str, str]) -> list[str]:
@@ -67,8 +78,16 @@ def template_lines(steps: Sequence[CalcStep], rules_used: Mapping[str, str]) -> 
         if unsupported:  # rule 3: only cite what C3 actually returned
             raise ValueError(f"{step.step_id} cites rules C3 did not return: {unsupported}")
         tags = "".join(f" [{ref}]" for ref in step.citation_refs)
-        lines.append(f"{step.description}: Rs. {step.result:,.2f}{tags}")
+        lines.append(f"{step.description}{_figures(step)}: Rs. {step.result:,.2f}{tags}")
     return lines
+
+
+def _figures(step: CalcStep) -> str:
+    """A capped relief's two figures, so the reader can see which one was taken."""
+    cap, paid = step.inputs.get("cap"), step.inputs.get("amount_paid")
+    if cap is None or paid is None:
+        return ""
+    return f": the yearly limit is Rs. {cap:,.2f} and the amount paid is Rs. {paid:,.2f}"
 
 
 def build_prompt(steps: Sequence[CalcStep], lines: Sequence[str]) -> str:
@@ -77,9 +96,15 @@ def build_prompt(steps: Sequence[CalcStep], lines: Sequence[str]) -> str:
 
 
 def explain(
-    steps: Sequence[CalcStep], rules_used: Mapping[str, str], llm: TextLLM | None = None
+    steps: Sequence[CalcStep],
+    rules_used: Mapping[str, str],
+    llm: TextLLM | None = None,
+    year_of_assessment: str | None = None,
+    known_names: Sequence[str] = (),
 ) -> ExplainOutcome:
-    """Explain `steps`. `rules_used` maps each rule_id the answer may cite to its citation.
+    """Explain `steps`. `rules_used` maps each rule_id the answer may cite to its citation;
+    `year_of_assessment` is the request's own year, which the rewrite may name;
+    `known_names` are names to redact from the prompt (e.g. the taxpayer's, from OCR).
 
     Without an LLM the template is the explanation. With one, its rewrite is used only if it
     passes the post-check. An LLM error falls back to the template without a confidence
@@ -91,13 +116,15 @@ def explain(
     if llm is None:
         return ExplainOutcome(_explanation(steps, template, rules_used), None)
 
+    redaction = redact(build_prompt(steps, template), known_names)
     try:
-        reply, model_version = llm.generate(build_prompt(steps, template))
+        reply, model_version = llm.generate(redaction.text)
     except Exception as exc:  # no answer at all; the type name carries no PII
         return ExplainOutcome(
             _explanation(steps, template, rules_used, "failed"),
             None,
             (f"explanation LLM call failed ({type(exc).__name__}); template text shown",),
+            redaction.count,
         )
 
     call = LlmCall(
@@ -105,16 +132,18 @@ def explain(
         model=model_version or llm.model,
         prompt_version=PROMPT_VERSION,
         temperature=llm.temperature,
-        output=reply,
+        output=reply,  # as the LLM sent it, placeholders and all: the trace holds no PII
     )
-    result = check(reply, steps, template, rules_used)
+    restored = restore(reply, redaction.mapping)
+    result = check(restored, steps, template, rules_used, year_of_assessment)
     if result.passed:
-        return ExplainOutcome(_explanation(steps, result.lines, rules_used, "accepted"), call)
+        explanation = _explanation(steps, result.lines, rules_used, "accepted")
+        return ExplainOutcome(explanation, call, pii_redacted=redaction.count)
     explanation = _explanation(
         steps, template, rules_used, "rejected", hallucination_flag=bool(result.hallucinations)
     )
     warnings = tuple(f"explanation rewrite rejected: {f}" for f in result.failures)
-    return ExplainOutcome(explanation, call, warnings)
+    return ExplainOutcome(explanation, call, warnings, redaction.count)
 
 
 def _explanation(

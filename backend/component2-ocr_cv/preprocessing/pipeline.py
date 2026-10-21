@@ -88,6 +88,21 @@ def _edge_support(edges: np.ndarray, quad: np.ndarray, samples: int = 400) -> fl
     return hits / max(total, 1)
 
 
+def _paper_continues_outside(gray: np.ndarray, quad: np.ndarray, band: int = 20, margin: float = 10.0) -> bool:
+    """True when the area just OUTSIDE the quad is as bright as the area just inside it.
+    Around a real page edge the photo shows the desk or background, which is darker than
+    paper. Around a ruled table or a printed box the paper simply continues, so the quad is
+    a box ON the page; warping to it would crop away the header (name, NIC, issuer, dates)."""
+    inside = np.zeros(gray.shape, np.uint8)
+    cv2.fillConvexPoly(inside, quad.astype(np.int32), 1)
+    k = np.ones((2 * band + 1, 2 * band + 1), np.uint8)
+    ring_in = (inside > 0) & ~(cv2.erode(inside, k) > 0)
+    ring_out = (cv2.dilate(inside, k) > 0) & ~(inside > 0)
+    if not ring_out.any() or not ring_in.any():
+        return False                                       # quad touches the image border on all sides
+    return float(gray[ring_out].mean()) >= float(gray[ring_in].mean()) - margin
+
+
 def correct_perspective(gray: np.ndarray, min_area_ratio: float = 0.3,
                         min_edge_support: float = 0.6) -> Tuple[np.ndarray, np.ndarray, bool]:
     """Find the page outline (largest convex 4-corner contour backed by a continuous edge)
@@ -106,6 +121,8 @@ def correct_perspective(gray: np.ndarray, min_area_ratio: float = 0.3,
         src = _order_corners(approx)
         if _edge_support(edges, src) < min_edge_support:
             continue  # outline of a text block, not a page border
+        if _paper_continues_outside(gray, src):
+            continue  # a ruled table/box on the page, not the page edge
         tl, tr, br, bl = src
         W = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
         Hh = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))

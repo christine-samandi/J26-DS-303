@@ -7,16 +7,19 @@ How a request is answered:
 2. Graph match: each rule has a neighbourhood in the graph -- the chunks that DEFINE its
    versions (direct evidence) and the chunks that belong to, AMEND or REFER TO the same
    provisions (one hop away). A rule's relevance is its best-matching chunk (one hop away
-   counts 0.8). Plain keywords ("tax slabs", "personal relief") also select a rule.
+   counts 0.8). Words that name a rule ("tax slabs", "solar panels") also select it; a bare
+   "relief" selects every relief (personal relief first). When the question names a rule,
+   only the rules it names are returned.
 3. Time: of each relevant rule, the version in force on `as_of_date` is returned (with
    `include_history`, the other versions too, marked not in force).
-4. Every result carries structured values (amount or bands), the citation, validity dates,
-   the evidence (chunk IDs, verbatim text, graph path) and a confidence score.
+4. Every result carries structured values (amount, cap, rate or bands), the citation, validity
+   dates, the evidence (chunk IDs, verbatim text, graph path) and a confidence score.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -42,6 +45,7 @@ from j26_contracts.retrieval import (
     Source,
     Validity,
 )
+from knowledge_graph.reliefs import RELIEFS
 from retrieval_api.lexical import LexicalIndex, tokens
 
 MIN_RELEVANCE = 0.6  # below this a rule is not returned for a text query
@@ -53,11 +57,13 @@ CONFIDENCE_METHOD = (
     "+ 0.15 extraction confidence + 0.25 temporal match; high >= 0.80, medium >= 0.50"
 )
 KEYWORDS = {  # words that name a rule directly
-    "personal_relief": ["personal relief", "relief", "allowance", "tax free"],
+    "personal_relief": ["personal relief", "tax free", "tax-free"],
     "individual_income_tax_slabs": ["slab", "band", "bracket", "tax rate", "rates of tax",
                                     "progressive", "tax table", "income tax rate", "how much tax",
                                     "tax payable", "tax on my", "tax do i pay"],
-}  # fmt: skip
+} | {key: list(r.keywords) for key, r in RELIEFS.items()}  # fmt: skip
+GENERIC_RELIEF = ["relief", "allowance", "deduction", "qualifying payment"]  # any relief
+DEFAULT_RELIEF = "personal_relief"  # what a bare "relief" means first: everyone gets it
 RATE_TYPES = {"tax_slab": {"tax_slab", "tax_rate"}}  # a slab rule also answers "tax_rate"
 
 
@@ -87,7 +93,8 @@ OPTIONAL MATCH (v)-[:SUPERSEDES]->(prev:RuleVersion)
 OPTIONAL MATCH (nxt:RuleVersion)-[:SUPERSEDES]->(v)
 OPTIONAL MATCH (c)-[:AMENDS]->(ap:Provision)
 RETURN v {.*} AS v, r {.*} AS rule, d {.*} AS doc,
-       c {.chunk_id, .section, .subsection, .schedule, .paragraph, .page_start, .text} AS chunk,
+       c {.chunk_id, .section, .subsection, .schedule, .paragraph, .page_start, .page_end,
+          .text} AS chunk,
        collect(DISTINCT b {.`order`, .lower, .upper, .rate_percent}) AS bands,
        collect(DISTINCT t.name) AS categories, collect(DISTINCT e.chunk_id) AS evidence,
        prev.rule_id AS supersedes, nxt.rule_id AS superseded_by,
@@ -111,7 +118,13 @@ def from_neo4j(driver) -> GraphData:
     versions = []
     for r in rows:
         # Neo4j does not store null properties: a missing valid_to / amount means null
-        v = {"valid_to": None, "amount": None} | {k: _native(x) for k, x in r["v"].items()}
+        v = {
+            "valid_to": None,
+            "amount": None,
+            "cap": None,
+            "rate_percent": None,
+            "value_kind": None,
+        } | {k: _native(x) for k, x in r["v"].items()}
         versions.append(
             v | {"rule": r["rule"], "doc": {k: _native(x) for k, x in r["doc"].items()},
                  "chunk": r["chunk"], "bands": sorted(r["bands"], key=lambda b: b["order"]),
@@ -219,8 +232,9 @@ def _rule_matches(req: RetrievalRequest, data: GraphData) -> dict[str, Match]:
         return {}
 
     text = req.query_text.lower()
-    matches = {}
-    for key in keys:
+    stems = " ".join(tokens(text))
+    matches, named = {}, set()
+    for key, rule in keys.items():
         hood = data.neighbourhood.get(key, {"direct": set(), "near": set()})
         best = Match(0.0, 0.0, 0.0, None)
         for cid in hood["direct"] | hood["near"]:
@@ -228,14 +242,25 @@ def _rule_matches(req: RetrievalRequest, data: GraphData) -> dict[str, Match]:
             weight = 1.0 if cid in hood["direct"] else NEAR_WEIGHT
             if cov * weight > best.relevance:
                 best = Match(cov * weight, cov, weight, cid)
-        stems = " ".join(tokens(text))
-        hits = [k for k in KEYWORDS.get(key, []) if k in text or k in stems]
+        hits = [k for k in KEYWORDS.get(key, []) if _says(k, text, stems)]
         if hits:  # a phrase ("personal relief") names the rule more surely than one word
-            best.relevance = max(best.relevance, 0.9 if any(" " in k for k in hits) else 0.7)
+            named.add(key)
+            best.relevance = max(best.relevance, 0.9 if any(" " in k for k in hits) else 0.8)
+            best.graph_match = best.graph_match or 0.6
+        elif rule["rule_type"] == "relief" and any(_says(k, text, stems) for k in GENERIC_RELIEF):
+            best.relevance = max(best.relevance, 0.7 if key == DEFAULT_RELIEF else 0.65)
             best.graph_match = best.graph_match or 0.6
         if best.relevance >= MIN_RELEVANCE:
             matches[key] = best
+    if named:  # "relief for solar panels": the solar relief, not every relief
+        matches = {k: m for k, m in matches.items() if k in named}
     return matches
+
+
+def _says(keyword: str, text: str, stems: str) -> bool:
+    """The question uses this word or phrase (whole words; plural or stemmed forms too)."""
+    pattern = rf"\b{re.escape(keyword)}(?:e?s)?\b"
+    return bool(re.search(pattern, text) or re.search(pattern, stems))
 
 
 def _confidence(match: Match, extraction: float, in_force: bool) -> Confidence:
@@ -253,7 +278,17 @@ def _confidence(match: Match, extraction: float, in_force: bool) -> Confidence:
 # --- building one result ------------------------------------------------------------------
 
 
+def _kind(v: dict) -> str:
+    if v.get("bands"):
+        return "bands"
+    return v.get("value_kind") or "amount"
+
+
 def _values(v: dict) -> RuleValues:
+    if _kind(v) == "cap":
+        return RuleValues(cap=Money(amount=v["cap"], currency="LKR", period="year_of_assessment"))
+    if _kind(v) == "rate":
+        return RuleValues(rate_percent=v["rate_percent"])
     if v.get("bands"):
         bands = [
             SlabBand(order=b["order"], lower=b["lower"], upper=b["upper"],
@@ -274,20 +309,34 @@ def _text(v: dict) -> str:
                 parts.append(f"{b['rate_percent']:g}% on Rs. {b['lower']:,} - {b['upper']:,}")
         return ("The taxable income of a resident or non-resident individual for a year of "
                 "assessment is taxed at: " + "; ".join(parts) + ".")  # fmt: skip
-    return (f"A resident individual is entitled to a personal relief of Rs. {v['amount']:,} for "
-            "each year of assessment.")  # fmt: skip
+    if v["rule_key"] == "personal_relief":
+        return (f"A resident individual is entitled to a personal relief of Rs. {v['amount']:,} "
+                "for each year of assessment.")  # fmt: skip
+    rule = v["rule"]
+    who = f" Who can claim: {rule['conditions']}." if rule.get("conditions") else ""
+    if _kind(v) == "cap":
+        return (f"{rule['title']}: up to Rs. {v['cap']:,} for each year of assessment, and not "
+                f"more than {rule.get('limited_to') or 'the amount concerned'}.{who}")  # fmt: skip
+    if _kind(v) == "rate":
+        return f"{rule['title']}: {v['rate_percent']:g}% of {rule.get('limited_to')}.{who}"
+    return f"{rule['title']}: Rs. {v['amount']:,} for each year of assessment.{who}"
 
 
 def _source(v: dict) -> Source:
     doc, c = v["doc"], v["chunk"]
-    if c.get("schedule"):
+    provision = v["rule"]["provision"]
+    if c.get("schedule") and v["rule_key"] in RELIEFS:  # name the subparagraph: "para 2(c)"
+        where = provision.replace(", paragraph ", " para ")
+    elif c.get("schedule"):
         where = f"{c['schedule'].title()} para {c['paragraph']}"
     else:
         where = f"s.{c['section']}" + (f"({c['subsection']})" if c.get("subsection") else "")
     citation = f"{doc['title']}, {where}"
     if v.get("amends"):
-        citation += f" (amending {v['rule']['provision']} of Act No. 24 of 2017)"
-    citation += f", p.{c['page_start']}"
+        citation += f" (amending {provision} of Act No. 24 of 2017)"
+    end = c.get("page_end")
+    citation += (f", pp.{c['page_start']}-{end}" if end and end != c["page_start"]
+                 else f", p.{c['page_start']}")  # fmt: skip
     return Source(
         document_id=doc["document_id"], document_title=doc["title"],
         document_type=doc["document_type"], act_number=doc.get("act_number"),
@@ -399,7 +448,7 @@ def retrieve(req: RetrievalRequest, data: GraphData | None = None) -> RetrievalO
         warnings += ["NO_MATCH", "PARTIAL_CORPUS_COVERAGE"]
     elif not any(r.validity.in_force_on_as_of_date for r in results):
         warnings.append("NO_RULE_IN_FORCE_ON_DATE")
-        if day < min(v["valid_from"] for v in pool):
+        if day < min(v["valid_from"] for v in data.versions):  # before the oldest law held
             warnings.append("AS_OF_DATE_BEFORE_CORPUS")
     if req.rule_types and set(req.rule_types) - tracked:
         warnings.append("PARTIAL_CORPUS_COVERAGE")

@@ -7,6 +7,7 @@ code change. Every entry is validated here before anything is downloaded.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 from functools import cache
 from pathlib import Path
@@ -63,6 +64,28 @@ class Registry(BaseModel):
         raise KeyError(f"{document_id} is not in the corpus registry")
 
 
+def registry_path() -> Path:
+    """corpus_sources.json, or C3_REGISTRY_PATH (tests, a separate deployment)."""
+    return Path(os.getenv("C3_REGISTRY_PATH") or REGISTRY_PATH)
+
+
 @cache
-def load_registry(path: Path = REGISTRY_PATH) -> Registry:
+def _load(path: Path) -> Registry:
     return Registry.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def load_registry(path: Path | None = None) -> Registry:
+    return _load(path or registry_path())
+
+
+load_registry.cache_clear = _load.cache_clear  # after the registry file is changed
+
+
+def add_document(doc: SourceDocument, path: Path | None = None) -> None:
+    """Append a document to the registry file (used by the automatic law monitor)."""
+    path = path or registry_path()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["documents"].append(json.loads(doc.model_dump_json()))
+    Registry.model_validate(data)  # refuse a duplicate id or file name before writing
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _load.cache_clear()

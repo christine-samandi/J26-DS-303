@@ -14,6 +14,7 @@ eval/
   scenarios/GS-NNN_<slug>.json   one scenario per file
   run_engine.py                  engine calculation accuracy (target 100%)
   run_baseline_llm.py            pure-LLM baseline: the LLM does the arithmetic, same scoring
+  run_explanation_checks.py      explanation post-check vs. tampered explanations (no LLM)
   results/                       run outputs, git-ignored
 ```
 
@@ -104,6 +105,38 @@ Only comparable runs are reused, and the script prints why any other run was ski
 
 An unparseable reply is a real answer (counted wrong) and is never asked again. The earliest
 answer always wins, never the best one, so resuming cannot cherry-pick results.
+
+### Explanation post-check: tamper detection
+
+```bash
+python eval/run_explanation_checks.py [--seed 0] [--variants 3]
+```
+
+How well the explanation post-check (`explanation_agent/post_check.py`) catches an LLM that
+lies while rewording. No LLM is called and the run is fully deterministic. For every scenario
+it builds the correct template explanation from the engine's steps, then tampered versions of
+it, and runs each through the real post-check, exactly as a Gemini reply would be checked.
+
+| Type | Subtypes | Must |
+|---|---|---|
+| `amount` | `small` (±1), `large` (±10,000, ×10), `digit_swap`, `role_swap` (another of the step's own figures stated as the result) | be rejected |
+| `rounding` | `cents` (96,000 → 96,000.50), `whole` (→ 95,999), `one_figure` (→ 100,000) | be rejected |
+| `citation` | `swap` (two steps exchange tags), `wrong_rule` (the other retrieved rule), `invented` (a rule C3 never returned) | be rejected |
+| `drop` | `step`, `citation` | be rejected |
+| `wrong_year` | `text` ("for YA 2024/25" in a 2025/26 case), `cited_rule` (the other YA's rule id) | be rejected |
+| `paraphrase` | `reword` (3 patterns), `format` (no decimals, no commas, tags first) | pass |
+| `correct_year_mention` | `text` (an honest "for YA <the scenario's own year>") | pass |
+
+Each generator lists every distinct change it can make to a scenario; up to `--variants` of
+them are sampled with an RNG seeded per scenario and generator, without replacement. A
+generator with nothing to change in a scenario is reported as not applicable and not scored.
+
+Writes `results/explanation_checks_<UTC time>_<git sha>.csv` (one row per variant: outcome,
+the post-check's reasons, the changed lines) and `.md`: the overall catch rate, the catch rate
+per type, the paraphrase false-alarm rate, the `correct_year_mention` false-alarm rate on its
+own, and tables of every miss and false alarm. The post-check's file hash is in the header.
+Exits 1 only if an untampered explanation fails the check (the harness is broken); misses and
+false alarms are the result being measured.
 
 ## Scenario format
 

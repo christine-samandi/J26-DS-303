@@ -27,9 +27,9 @@ The models also enforce rules JSON Schema cannot express:
 |---|---|---|
 | Contract + mock API | `retrieval_api/`, `contracts/j26_contracts/` | ✅ v1.0.0 (mock mode, Pydantic-validated) |
 | Data acquisition + PDF parsing | `data_collection/` | ✅ Phase 1 (full Act series: 2017 Act + 6 amendments; parser tuned on the real PDFs: 379/379 sections, all 6 schedules) |
-| Ground truth | `ground_truth/` | ✅ rule versions (personal relief V1–V4, tax bands B1–B4, all verified); entity answer key (10 core chunks, 246 entities) |
+| Ground truth | `ground_truth/` | ✅ rule versions (personal relief V1–V4, tax bands B1–B4, all verified; the six other Fifth Schedule reliefs in `relief_versions.csv`, to be verified); entity answer key (10 core chunks, 246 entities) |
 | Entity extraction (spaCy + regex) | `entity_recognition/` | ✅ Phase 2: 1,324 chunks, 10 entity types; blind P 0.97 / R 1.00, adjudicated P = R = 0.996 (10 core chunks) |
-| Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ✅ Phase 3: rule versions rebuilt from the Acts (8/8 exact); graph builder |
+| Knowledge graph + versioning (Neo4j) | `knowledge_graph/` | ✅ Phase 3: rule versions rebuilt from the Acts (14/14 exact: personal relief, tax bands and, through the general relief engine, Fifth Schedule para 2(b)–(g)); graph builder |
 | Vector store (ChromaDB) | `vector_store/` | ⏳ next (TF-IDF term coverage used for now) |
 | Indexing cost vs LLM extraction | `evaluation/indexing_cost.py` | ✅ whole pipeline timed on all 7 Acts (~3 s, 0 tokens, deterministic); LLM baseline (Gemini) scored on the same gold chunks |
 | GraphRAG retrieval | `retrieval_api/` | ✅ Phase 4: text + graph neighbourhood + date filter, contract output, confidence (`C3_MODE=graphrag`) |
@@ -94,16 +94,61 @@ OPTIONAL MATCH (v)-[:DEFINED_IN]->(c:Chunk)
 RETURN v, c
 ```
 
+**The general relief engine** (`knowledge_graph/reliefs.py`). Every relief in Fifth Schedule
+paragraph 2, not only personal relief, is rebuilt by one method: the 2017 wording is split into
+its subparagraphs, every amendment is applied in order (subparagraph replaced, words
+substituted, new subparagraphs added), and the value (fixed amount, cap or percentage) and
+period are read from the latest wording. A new subparagraph with no date of its own starts on
+its section's operation date (the Act's Table 'A'). Only names, conditions and question words
+are written by hand (`RELIEFS`); values and dates come from the Acts.
+
+| Relief | Para | Value | In force |
+|---|---|---|---|
+| Employment relief | 2(b) | up to Rs. 700,000 | 2018-04-01 .. 2019-12-31 (withdrawn) |
+| Rent relief | 2(c) | 25% of rental income | 2018-04-01 .. now |
+| Senior citizen interest relief | 2(d) | up to Rs. 1,500,000 | 2018-04-01 .. 2019-12-31 (withdrawn) |
+| Foreign-currency service income | 2(e) | up to Rs. 15,000,000 | 2018-04-01 .. 2019-12-31 (withdrawn) |
+| Expenditure relief (health, education, housing loan, pension, shares) | 2(f) | up to Rs. 1,200,000 | 2020-01-01 .. 2022-12-31 (withdrawn) |
+| Solar panel relief | 2(g) | up to Rs. 600,000 | 2021-04-01 .. now |
+
+A withdrawn relief has status `outdated`; asked about on a date it is not in force, the API
+returns no result and the warning `NO_RULE_IN_FORCE_ON_DATE` (with `include_history`, the
+version and its dates). Not yet covered: qualifying payments (para 1: donations) and
+exemptions (Third Schedule).
+
 **Adding a newly published Act** (no full rebuild; see `DEMO.md`)
 ```bash
 python -m knowledge_graph.build --until 2025-01-01      # the graph as it was known before 2025
 python -m knowledge_graph.update DOC-IRA-AMEND-02-2025  # new Act -> new versions + change report
 ```
 
+**Law monitor, automatic updates and notifications** (keeping the knowledge base current)
+```bash
+python -m data_collection.monitor              # check the IRD Acts page now; add what is safe
+python -m data_collection.monitor --every      # keep checking, once a month
+python -m data_collection.monitor --list       # what was found: added / held (with reason)
+python -m data_collection.monitor --retry URL  # run the checks again on a held document
+```
+1. The monitor finds an income tax PDF that is not in the corpus.
+2. `knowledge_graph.auto_update` adds it **by itself if all seven safety checks pass**: it is a
+   PDF; its cover page says "Inland Revenue (Amendment) Act, No. N of YYYY" (it is registered
+   from that); it is not already in the corpus; it parses without warnings; no rule version
+   disappears; every hand-verified version is still rebuilt exactly (only an open-ended version
+   may get an end date); all values are possible (amounts > 0, rates 0-100%, bands in order).
+   If any check fails, nothing changes (registry, files and graph are put back) and the
+   document is HELD with the reason in a maintainer notification.
+3. Added: the graph is updated, the API reloaded, and the change is recorded as a
+   `law_change` notification (GET /notifications) in plain words with the Act's sentence.
+
+Future improvement: deliver each change to the in-app inbox of the users whose saved
+calculations it affects, once the app has user accounts.
+
 **Phase 4: ask the graph (Neo4j running, graph built)**
 ```bash
 python -m retrieval_api.graph_backend "What personal relief can I claim?" --date 2024-06-01
 python -m retrieval_api.graph_backend "tax slabs" --date 2021-06-01 --history
+python -m retrieval_api.graph_backend "Can I claim relief for solar panels?" --date 2025-06-01
+python -m retrieval_api.graph_backend "What reliefs can I claim?" --date 2021-06-01
 ```
 Set `C3_MODE=graphrag` in `.env` to make the API below answer from the graph instead of the
 mock examples (restart the API after rebuilding the graph).
@@ -147,6 +192,8 @@ curl -X POST http://localhost:8003/retrieve -H "Content-Type: application/json" 
 |---|---|---|
 | GET | `/health` | Liveness + current mode |
 | POST | `/retrieve` | Retrieval (body = `RetrievalRequest`, response = `RetrievalOutput`) |
+| POST | `/reload` | Re-read the graph after `knowledge_graph.update` |
+| GET | `/notifications` | Law-change notifications, newest first (`?audience=users\|admin&since=...`) |
 
 Invalid requests get `422` with the list of contract errors. Every response is validated
 against the output schema before it is sent.

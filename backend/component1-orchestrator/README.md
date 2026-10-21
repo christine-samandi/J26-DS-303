@@ -58,7 +58,7 @@ deps = Deps(MockOcrClient(), retrieval_client_from_env({"C1_RETRIEVAL": "http"})
 `HttpOcrClient` uploads the user's payslip to C2's service (`POST /extract`, ocr_output v0.1)
 and maps the answer to C1's `OcrResult`: `gross_income` -> `employment_income`,
 `apit` -> `apit_paid`, keeping C2's per-field confidence (it feeds C1's confidence score).
-It asks C2's `/health` which OCR languages are installed and uses those of sin/tam/eng.
+It sends `lang=auto`, so C2 detects which of English/Sinhala/Tamil are on the page.
 
 A payslip is usually one month; the tax is for the year. "The payslip covers" decides the
 scaling (one month -> x 12, annual summary -> x 1). The scaling is an assumption, so the demo

@@ -255,11 +255,19 @@ def test_honest_explainer_rewrite_is_delivered_and_logged_in_the_trace():
     assert (call.stage, call.model, call.prompt_version, call.temperature) == (
         "explain",
         "fake-explainer-001",
-        "explain-v2",
+        "explain-v4",
         0,
     )
     assert trace.explanation == result.explanation
     assert [c.text for c in trace.claims] == list(result.explanation.lines)
+
+
+@pytest.mark.parametrize("year,accepted", [("2025/26", True), ("2024/25", False)])
+def test_explainer_may_name_only_the_requests_own_year(year, accepted):
+    line = f"For YA {year} you still owe Rs. 46,000."
+    result = run(typed(), llm_deps(FakeExplainer(cheat={"S6_PAYABLE": line})))
+    assert result.explanation.hallucination_flag is not accepted
+    assert (line in result.explanation.lines) is accepted
 
 
 def test_cheating_explainer_is_caught_flagged_and_sent_for_review():

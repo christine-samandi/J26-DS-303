@@ -154,3 +154,46 @@ def test_decimal_from_text_not_float(load_modified):
 def test_inconsistent_seed_rejected(load_modified, change, message):
     with pytest.raises(RuleSetError, match=message):
         load_modified(change)
+
+
+# --- the seed file's other reliefs ---------------------------------------------
+
+
+@pytest.fixture
+def load_reliefs_modified(tmp_path, monkeypatch, seed_data):
+    def _load(change):
+        data = copy.deepcopy(seed_data)
+        change(data["reliefs"][0])
+        (tmp_path / "ya_2025_26.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+        monkeypatch.setattr(ruleset, "RULES_DIR", tmp_path)
+        return ruleset.load_seed_reliefs(YA)
+
+    return _load
+
+
+def test_seed_reliefs_cite_a_listed_source(seed_data):
+    known = {s["id"] for s in seed_data["sources"]}
+    for r in seed_data["reliefs"]:
+        assert r["source"]["citation"]
+        assert set(r["source"]["source_ids"]) <= known
+
+
+def test_seed_relief_values_are_decimal():
+    (solar,) = ruleset.load_seed_reliefs(YA)
+    assert isinstance(solar.value, Decimal) and solar.value == Decimal(600000)
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda r: r["validity"].update(valid_from=date(2025, 5, 1)), "does not cover the whole"),
+        (lambda r: r["validity"].update(valid_to=date(2025, 12, 31)), "does not cover the whole"),
+        (lambda r: r["values"].update(rate_percent=5), "exactly one"),
+        (lambda r: r["values"]["cap"].update(currency="USD"), "LKR"),
+        (lambda r: r["values"]["cap"].update(amount="600000"), "expected a number"),
+        (lambda r: r.update(rule_key="personal_relief"), "personal relief"),
+    ],
+)
+def test_inconsistent_seed_relief_rejected(load_reliefs_modified, change, message):
+    with pytest.raises(RuleSetError, match=message):
+        load_reliefs_modified(change)

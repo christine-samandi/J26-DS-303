@@ -77,7 +77,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--split", choices=["all", "dev", "test"], default="all")
     ap.add_argument("--engines", default="tesseract", help="comma list, e.g. tesseract,paddle")
     ap.add_argument("--modes", default="raw,pre", help="raw (no preprocessing), pre (preprocessing on)")
-    ap.add_argument("--lang", default="auto", help="'auto' = from the manifest language column, or e.g. sin+tam+eng")
+    ap.add_argument("--lang", default="auto", help="'auto' = from the manifest language column; 'detect' = the "
+                                                   "pipeline's own language detection; or e.g. sin+tam+eng")
     args = ap.parse_args(argv)
 
     data = Path(args.data)
@@ -110,7 +111,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         except (UnsupportedFile, FileNotFoundError) as e:
             print(f"skip {r['image_file']}: {e}")
             continue
-        lang = tesseract_lang(r.get("language", ""), installed) if args.lang == "auto" else args.lang
+        lang = (tesseract_lang(r.get("language", ""), installed) if args.lang == "auto"
+                else "auto" if args.lang == "detect" else args.lang)
 
         for engine in engines:
             for mode in modes:

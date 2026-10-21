@@ -11,7 +11,7 @@ Why this module exists:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence
 
 from entity_extraction.amounts import looks_numeric, parse_amount
@@ -19,8 +19,9 @@ from entity_extraction.keywords import match_field
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
-PERSONAL_FIELD = re.compile(r"^\W*(name|nic|number|no\b|employee|emp\b|department|designation|address|"
-                            r"account|date|period|month)\b", re.I)
+PERSONAL_FIELD = re.compile(r"^\W*(?:(name|nic|number|no|employee|emp|department|designation|address|"
+                            r"account|date|period|month)\b|නම|අංකය|ජා\.?\s*හැ|ලිපිනය|දෙපාර්තමේන්තුව)", re.I)
+MIN_ISSUER_GUESS_CONF = 0.6   # first-line issuer guess needs a clearly read line
 ISSUER_HINTS = re.compile(r"\b(pvt|ltd|limited|plc|company|co\.|bank|holdings|corporation|\(pvt\))", re.I)
 
 
@@ -92,6 +93,14 @@ def split_amount(line: Line):
     """Return (label_tokens, amount_tokens): the trailing run of numeric-looking tokens is the
     amount (OCR sometimes splits '150, 000.00' into pieces, so they are joined)."""
     toks = line.tokens
+    # Drop trailing punctuation-only fragments (table rules read as ' | \ ) so they do not hide
+    # the amount: "CLOSING 26 215 08 '" must still give the amount 26 215 08.
+    while toks and not any(ch.isalnum() for ch in toks[-1].text):
+        toks = toks[:-1]
+    # A table rule read as 1-2 letters right after an amount ('26 215 08 if') is noise, not a label.
+    while len(toks) >= 2 and len(toks[-1].text) <= 2 and not looks_numeric(toks[-1].text) \
+            and looks_numeric(toks[-2].text):
+        toks = toks[:-1]
     i = len(toks)
     while i > 0 and looks_numeric(toks[i - 1].text):
         i -= 1
@@ -139,15 +148,22 @@ def find_issuer(lines: List[Line]) -> Optional[Candidate]:
     # Lines that are field labels, carry an amount or hold personal key-value data (Name :, NIC ...)
     # are never the issuer: 'EPF Corporation Contribution 28,775.29' contains 'Corporation' but is a field.
     top = [ln for ln in lines[: max(3, len(lines) // 4)]
-           if not split_amount(ln)[1] and not match_field(ln.text) and not PERSONAL_FIELD.match(ln.text)]
+           if not split_amount(ln)[1] and not match_field(ln.text) and not PERSONAL_FIELD.match(ln.text)
+           and "\u25cf" not in ln.text]           # a line the PII guard masked ('●') is personal data
     for ln in top:
         if ISSUER_HINTS.search(ln.text):
             conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
             return Candidate("issuer", ln.text.strip(" -|"), ln.text, ocr_confidence=round(conf, 4),
                              bbox=union_bbox(ln.tokens))
     for ln in top:
-        if sum(c.isalpha() for c in ln.text) >= 3 and not split_amount(ln)[1]:
-            conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens) * 0.8
+        letters = sum(c.isalpha() for c in ln.text)
+        raw_conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
+        # A guess from a noisy line ('......', table rules, half-masked rows) is worse than no
+        # issuer: the field is then simply missing and C1 can ask the user.
+        if letters < 3 or letters < 0.5 * len(ln.text.replace(" ", "")) or raw_conf < MIN_ISSUER_GUESS_CONF:
+            continue
+        if not split_amount(ln)[1]:
+            conf = raw_conf * 0.8
             c = Candidate("issuer", ln.text.strip(" -|"), ln.text, ocr_confidence=round(conf, 4),
                           bbox=union_bbox(ln.tokens))
             c.notes.append("issuer guessed from the first text line (no company word found)")
@@ -155,10 +171,32 @@ def find_issuer(lines: List[Line]) -> Optional[Candidate]:
     return None
 
 
+# Sinhala slips print BOTH employer contributions as '... සංස්ථා දායකත්වය' (corporation contribution);
+# only the abbreviation in front (ඊ.පී.එෆ්. = EPF, ඊ.ටී.එෆ්. = ETF) tells them apart, and phone photos
+# often garble it. Adding OCR-garbled spellings as keywords would be guessing, so the twin rule
+# below uses the law instead: employer EPF (12-15%) is always larger than ETF (3%) on the same pay.
+AMBIGUOUS_CONTRIBUTION = "සංස්ථා දායකත්වය"
+
+
+def resolve_contribution_twins(found: Dict[str, Candidate], twins: List[Candidate]) -> None:
+    """Two or more lines matched only the ambiguous phrase: larger amount = epf_employer, smaller = etf."""
+    if len(twins) < 2 or ("epf_employer" in found and found["epf_employer"] not in twins):
+        return
+    big, small = sorted(twins, key=lambda c: c.value, reverse=True)[:2]
+    if not big.value or small.value >= big.value:
+        return
+    big = replace(big, field="epf_employer", notes=big.notes + [
+        "label 'සංස්ථා දායකත්වය' is shared by EPF and ETF: the larger amount is employer EPF (12-15% > 3%)"])
+    small = replace(small, notes=small.notes + [
+        "label 'සංස්ථා දායකත්වය' is shared by EPF and ETF: the smaller amount is ETF (3%)"])
+    found["epf_employer"], found["etf"] = big, small
+
+
 def extract_fields(tokens: Sequence) -> Dict[str, Candidate]:
     """Return the best candidate per field (amount fields, plus issuer and pay_period)."""
     lines = group_lines(tokens)
     found: Dict[str, Candidate] = {}
+    twins: List[Candidate] = []
 
     def keep(c: Optional[Candidate]):
         if c is None:
@@ -183,6 +221,8 @@ def extract_fields(tokens: Sequence) -> Dict[str, Candidate]:
             c = _amount_candidate(fname, label_toks, amount_toks, score)
             if c:
                 c.line_index, c.amount_line, c.phrase_words = i, i, words
+                if phrase == AMBIGUOUS_CONTRIBUTION:
+                    twins.append(c)
             keep(c)
             continue
         # Label without a value on its line: take an amount-only line directly below it. The amount
@@ -200,6 +240,7 @@ def extract_fields(tokens: Sequence) -> Dict[str, Candidate]:
                     keep(c)
                     break
 
+    resolve_contribution_twins(found, twins)
     keep(find_pay_period(lines))
     keep(find_issuer(lines))
     return found

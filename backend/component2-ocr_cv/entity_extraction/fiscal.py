@@ -6,7 +6,8 @@ makes sense. A payslip, however, must obey arithmetic:
     net pay = gross pay - total deductions            (always true - a HARD rule)
     gross   = basic + allowances                      (true unless other earnings exist - SOFT)
     total deductions = EPF(employee) + APIT           (true unless other deductions exist - SOFT)
-    EPF employee = 8%, EPF employer = 12%, ETF = 3% of EPF-liable earnings (basic or gross - SOFT)
+    EPF employee = 8%, EPF employer = 12% (15% at some employers), ETF = 3% of EPF-liable
+    earnings (basic, basic + COLA, or gross - SOFT)
 This module (1) checks every rule whose fields were found, and (2) when a rule fails, tries the
 most likely OCR misreadings of each amount (one extra digit, one dropped digit, one look-alike
 digit swap such as 3<->8, 1<->7) and keeps a change only if it makes the arithmetic consistent
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 TOL = 1.0   # rupees; rounding on payslips is to the cent, so 1 rupee is generous
+PRECISE_TOL = 0.05   # two amounts rounded separately from the same base differ by a few cents at most
 
 # Digit pairs that OCR commonly confuses in printed numbers.
 DIGIT_SWAPS = {"1": "7", "7": "1", "3": "8", "8": "3", "5": "6", "6": "5", "0": "8", "1": "4", "4": "1",
@@ -32,16 +34,27 @@ class Rule:
     hard: bool
     check: Callable[[Dict[str, float]], bool]
     text: str
+    precise: bool = False      # matches to the cent: one repaired precise rule is enough evidence
 
 
 def _eq(a: float, b: float) -> bool:
     return abs(a - b) <= TOL
 
 
-def _rate_rule(f: str, rate: float):
+def epf_bases(v: Dict[str, float]) -> List[float]:
+    """Possible EPF-liable earnings. By law COLA (cost-of-living allowance) is EPF-liable, so a
+    real Sinhala slip calculates EPF/ETF on basic + COLA (179,045.79 + 12,789.50)."""
+    bases = [v[b] for b in ("basic_salary", "gross_income") if b in v]
+    if "basic_salary" in v and "cola" in v:
+        bases.append(v["basic_salary"] + v["cola"])
+    return bases
+
+
+def _rate_rule(f: str, *rates: float):
+    """Several rates are allowed: most employers pay 12% employer EPF, some (e.g. semi-government
+    bodies) pay 15%; the payslip in hand decides which one its arithmetic matches."""
     def check(v):
-        bases = [v[b] for b in ("basic_salary", "gross_income") if b in v]
-        return any(_eq(v[f], round(base * rate, 2)) for base in bases)
+        return any(_eq(v[f], round(base * r, 2)) for base in epf_bases(v) for r in rates)
     return check
 
 
@@ -56,11 +69,16 @@ RULES: List[Rule] = [
          lambda v: _eq(v["total_deductions"], v["epf_employee"] + v["apit"]),
          "total deductions equal employee EPF plus APIT"),
     Rule("EPF employee = 8%", ("epf_employee",), False, _rate_rule("epf_employee", 0.08),
-         "employee EPF is 8% of basic or gross"),
-    Rule("EPF employer = 12%", ("epf_employer",), False, _rate_rule("epf_employer", 0.12),
-         "employer EPF is 12% of basic or gross"),
+         "employee EPF is 8% of EPF-liable earnings"),
+    Rule("EPF employer = 12% or 15%", ("epf_employer",), False, _rate_rule("epf_employer", 0.12, 0.15),
+         "employer EPF is 12% (or 15% at some employers) of EPF-liable earnings"),
     Rule("ETF = 3%", ("etf",), False, _rate_rule("etf", 0.03),
-         "ETF is 3% of basic or gross"),
+         "ETF is 3% of EPF-liable earnings"),
+    # Same base for both, so their RATIO is fixed (3/12 or 3/15) even when basic/COLA were not
+    # read: on a real slip this check alone repaired ETF read as 9,755.06 (true 5,755.06).
+    Rule("ETF = EPF employer x 3/12 or 3/15", ("etf", "epf_employer"), False,
+         lambda v: any(abs(v["etf"] - v["epf_employer"] * r) <= PRECISE_TOL for r in (3 / 12, 3 / 15)),
+         "ETF (3%) and employer EPF (12% or 15%) are calculated on the same earnings", precise=True),
 ]
 
 
@@ -120,6 +138,13 @@ def misreadings(value: float) -> List[Tuple[float, int]]:
     return [(v, 1) for v in sorted(out)]
 
 
+def _pairs(checks: List[CheckResult], base: List[CheckResult]):
+    """(trial check, base check, rule) for rules evaluated in both."""
+    by_name = {b.rule: b for b in base}
+    rules = {r.name: r for r in RULES}
+    return [(c, by_name[c.rule], rules[c.rule]) for c in checks if c.rule in by_name]
+
+
 def _score(checks: List[CheckResult]) -> Tuple[int, int]:
     return (sum(c.passed for c in checks if c.hard), sum(c.passed for c in checks if not c.hard))
 
@@ -146,7 +171,11 @@ def validate_and_correct(values: Dict[str, float], max_changes: int = 1) -> Fisc
                     trial[f] = v
                 checks = evaluate(trial)
                 hard, soft = _score(checks)
-                gain_ok = (hard > base_hard) or (soft - base_soft >= 2)
+                # A random wrong digit almost never matches a cent-precise rule, so repairing one
+                # precise rule is enough; ordinary soft rules (1-rupee tolerance) need two.
+                precise_gain = any(c.passed and not b.passed and r.precise
+                                   for c, b, r in _pairs(checks, base_checks))
+                gain_ok = (hard > base_hard) or (soft - base_soft >= 2) or (precise_gain and soft > base_soft)
                 if not gain_ok or hard < base_hard:
                     continue
                 key = (hard, soft, -k)

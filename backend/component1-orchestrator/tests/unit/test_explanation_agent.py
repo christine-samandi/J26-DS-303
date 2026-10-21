@@ -123,7 +123,7 @@ def test_prompt_carries_the_template_lines_and_ids():
 @pytest.mark.parametrize(
     "text",
     [
-        f"Taxable: Rs 1200000, i.e. 3000000 less 1800000 [{RELIEF.rule_id}]",
+        f"3000000 less 1800000 leaves a taxable Rs 1200000 [{RELIEF.rule_id}]",
         f"Rs. 1,200,000.00 is taxed [{RELIEF.rule_id}]",
     ],
 )
@@ -159,6 +159,16 @@ CHEATS = {
         "S3_BAND_2",
         f"The next part is taxed at 18% [{BANDS.rule_id}].",
         "the result 36000.00 is missing",
+    ),
+    "role swap": (  # both figures are S6's own, but the total tax is stated as the result
+        "S6_PAYABLE",
+        "Your total tax is Rs. 46,000, so after the APIT credit you still owe Rs. 96,000.",
+        "states 96000 as the result, but the result is 46000.00",
+    ),
+    "result not stated last": (  # true, but no longer checkable as the step's result
+        "S2_TAXABLE_INCOME",
+        f"Rs. 1,200,000 is taxed: Rs. 3,000,000 less Rs. 1,800,000 [{RELIEF.rule_id}].",
+        "states 1800000 as the result, but the result is 1200000",
     ),
     "number in words": (
         "S2_TAXABLE_INCOME",
@@ -339,3 +349,53 @@ def test_number_words_are_found_whole_and_case_insensitively():
         "percent",
         "million",
     ]
+
+
+# --- the year of assessment -------------------------------------------------------------------
+
+
+def run_for_year(text, year_of_assessment):
+    return explain(STEPS, RULES_USED, FakeLLM(text), year_of_assessment=year_of_assessment)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "So for YA 2025/26 you still owe Rs. 46,000.",
+        "So you still owe Rs. 46,000 for YA 2025/26.",  # after the result: still the last figure
+        "In 2025-2026 you still owe Rs. 46,000.",
+        "In YA 2025 - 26 you still owe Rs. 46,000.",
+    ],
+)
+def test_the_requests_own_year_may_be_named(line):
+    outcome = run_for_year(reply(S6_PAYABLE=line), "2025/26")
+    assert outcome.explanation.rewrite_status == "accepted", outcome.warnings
+
+
+@pytest.mark.parametrize("year", ["2024/25", "2026-27", "2024/2025"])
+def test_another_year_is_a_hallucination(year):
+    outcome = run_for_year(reply(S6_PAYABLE=f"For YA {year} you still owe Rs. 46,000."), "2025/26")
+    assert outcome.explanation.hallucination_flag
+    assert outcome.warnings == (
+        "explanation rewrite rejected: "
+        f"S6_PAYABLE: mentions YA {year}, but this request is for YA 2025/26",
+    )
+
+
+def test_without_a_year_of_assessment_a_year_is_read_as_numbers():
+    outcome, _ = run(reply(S6_PAYABLE="For YA 2025/26 you still owe Rs. 46,000."))
+    assert outcome.explanation.hallucination_flag
+    assert any("2025 is not one of the engine's figures" in w for w in outcome.warnings)
+
+
+def test_a_range_of_amounts_is_not_taken_for_a_year():
+    outcome = run_for_year(
+        reply(S6_PAYABLE="Between 2000-2500 you still owe Rs. 46,000."), "2025/26"
+    )
+    assert any("2000 is not one of the engine's figures" in w for w in outcome.warnings)
+    assert not any("mentions YA" in w for w in outcome.warnings)
+
+
+def test_a_malformed_year_of_assessment_is_refused():
+    with pytest.raises(ValueError, match="not a year of assessment"):
+        run_for_year(reply(), "2025")

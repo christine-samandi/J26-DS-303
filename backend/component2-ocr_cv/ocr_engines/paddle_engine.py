@@ -16,8 +16,22 @@ Adaptation to the shared format:
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import List, Sequence
+
+# Speed (Paddle on CPU took ~5 minutes for one 4000-px phone photo):
+#  - skip PaddleX's network check of the model hosters on every model load,
+#  - detect text on a copy whose longest side is at most DET_MAX_SIDE pixels (boxes come back in the
+#    original coordinates), and
+#  - use the lighter mobile text detector; recognition keeps the language's default model.
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+DET_MAX_SIDE = int(os.environ.get("C2_PADDLE_DET_MAX_SIDE", "1600"))
+DET_MODEL = os.environ.get("C2_PADDLE_DET_MODEL", "PP-OCRv5_mobile_det")
+# Lighter text readers per language (the default 'medium' reader dominated CPU time: ~100 text lines
+# per payslip). Set C2_PADDLE_FAST=0 to go back to Paddle's default models.
+REC_MODEL = {"en": "en_PP-OCRv5_mobile_rec", "ta": "ta_PP-OCRv5_mobile_rec"}
+FAST = os.environ.get("C2_PADDLE_FAST", "1") != "0"
 
 import numpy as np
 
@@ -70,8 +84,27 @@ def _model(lang: str):
     from paddleocr import PaddleOCR   # imported lazily: the rest of the pipeline works without Paddle
     # enable_mkldnn=False: Paddle 3.x on Windows CPUs crashes inside oneDNN with the PP-OCRv6 models
     # ("ConvertPirAttribute2RuntimeAttribute not support"); plain CPU inference is slower but stable.
-    return PaddleOCR(lang=lang, use_doc_orientation_classify=False, use_doc_unwarping=False,
-                     use_textline_orientation=False, enable_mkldnn=False)
+    base = dict(lang=lang, use_doc_orientation_classify=False, use_doc_unwarping=False,
+                use_textline_orientation=False, enable_mkldnn=False)
+    fast = dict(text_det_limit_side_len=DET_MAX_SIDE, text_det_limit_type="max")
+    light = dict(fast, text_detection_model_name=DET_MODEL)
+    options = [dict(light, text_recognition_model_name=REC_MODEL[lang])] if lang in REC_MODEL else []
+    options += [light, fast, {}] if FAST else [{}]
+    for extra in options:                                                       # fall back if a setting
+        try:                                                                    # is not supported
+            return PaddleOCR(**base, **extra)
+        except Exception:  # noqa: BLE001  any load error: try the next, simpler setting
+            continue
+    return PaddleOCR(**base)
+
+
+def warm_up(lang: str = "en") -> bool:
+    """Load the Paddle model once (e.g. when the API starts), so the first upload is not slow."""
+    try:
+        _model(lang)
+        return True
+    except Exception:
+        return False
 
 
 def _field(result, key):

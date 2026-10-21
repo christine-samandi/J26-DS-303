@@ -17,8 +17,13 @@ C3_MODE (in .env) picks the backend; the endpoint and contract are the same for 
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from dataclasses import asdict
+from datetime import datetime
+from typing import Annotated
 
+from fastapi import FastAPI, HTTPException, Query
+
+from c3_common import notifications
 from c3_common.config import get_settings
 from c3_common.contracts import validate_output
 from j26_contracts.retrieval import RetrievalOutput, RetrievalRequest, to_contract_json
@@ -69,3 +74,16 @@ def reload_graph() -> dict[str, str | int]:
         return {"status": "ok", "mode": get_settings().mode}
     data = graph_backend.graph()
     return {"status": "reloaded", "rule_versions": len(data.versions), "chunks": len(data.chunks)}
+
+
+@app.get("/notifications")
+def list_notifications(
+    since: Annotated[datetime | None, Query(description="only those created after this")] = None,
+    audience: Annotated[str | None, Query(description="users | admin")] = None,
+) -> dict:
+    """Law-change notifications (newest first): new Acts found on the IRD site (admin) and the
+    rule versions an added Act changed (users). See c3_common.notifications."""
+    if since and since.tzinfo is None:
+        raise HTTPException(status_code=422, detail="since must include a time zone, e.g. Z")
+    items = notifications.select(notifications.load(), since=since, audience=audience)
+    return {"notifications": [asdict(n) for n in reversed(items)], "count": len(items)}
