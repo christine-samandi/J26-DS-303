@@ -1,8 +1,17 @@
-"""C1 PP1 demo: input -> orchestrator -> cited, verified answer."""
+"""C1 PP1 demo: input -> orchestrator -> cited, verified answer.
 
+Documents are "doc-1", "doc-2"... everywhere past this page (findings, the C4 trace, C2's
+upload): only this page shows the file names, by mapping the ids back (`named`).
+Invoices and receipts are a two-step flow: Calculate finds the reliefs and their questions;
+the user confirms amount and date, answers, and presses Recalculate.
+"""
+
+import hashlib
 import os
 import random
+import re
 import sys
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -30,8 +39,8 @@ from orchestrator.clients import (  # noqa: E402
 )
 from orchestrator.graph import run  # noqa: E402
 from orchestrator.llm import explainer_llm_from_env  # noqa: E402
-from orchestrator.models import TaxRequest  # noqa: E402
-from orchestrator.stages import Deps  # noqa: E402
+from orchestrator.models import DocumentInput, OcrResult, TaxRequest  # noqa: E402
+from orchestrator.stages import Deps, doc_id  # noqa: E402
 
 PAYSLIPS = {
     "Clean payslip": "payslip_clean",
@@ -39,6 +48,22 @@ PAYSLIPS = {
     "Refund case": "payslip_refund",
     "High income (all 5 bands)": "payslip_high_income",
 }
+# Offline invoices/receipts (mock C2): checked for reliefs against the mock C3 relief answers
+MOCK_RELIEF_DOCS = {
+    "Solar panel invoice (Rs 800,000, 15 Aug 2025)": "solar_invoice_2025",
+    "Medical receipt (Rs 45,000, 10 Sep 2025): relief withdrawn": "medical_receipt_2025",
+    "Receipt, issuer unreadable": "receipt_unreadable_issuer",
+    "Bank statement (not analysed)": "bank_statement_2025",
+}
+RELIEF_BADGE = {  # ReliefStatus -> (label, colour)
+    "applied": ("Applied", "green"),
+    "not_applied": ("Not applied", "gray"),
+    "needs_review": ("Needs your input", "orange"),
+    "not_supported": ("Not supported yet", "blue"),
+    "no_relief": ("No relief", "gray"),
+    "withdrawn": ("Relief withdrawn", "red"),
+}
+ANSWERS = ["Not answered", "Yes", "No"]
 # YAs the live C3 graph can answer, and those C1's mock C3 has a file for
 LIVE_YEARS = [f"{y}/{(y + 1) % 100:02d}" for y in range(2026, 2018, -1)]  # 2026/27 .. 2019/20
 MOCK_YEARS = ["2025/26", "2024/25"]
@@ -113,11 +138,12 @@ def excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def rule_refs(rules) -> dict:
-    """rule_id -> RuleRef for the rules a result's steps can cite."""
+def rule_refs(rules, reliefs=()) -> dict:
+    """rule_id -> RuleRef for the rules a result's steps can cite (reliefs: those applied)."""
     if rules is None:
         return {}
-    return {ref.rule_id: ref for ref in (rules.personal_relief.ref, rules.tax_bands.ref)}
+    refs = (rules.personal_relief.ref, rules.tax_bands.ref, *(c.rule.ref for c in reliefs))
+    return {ref.rule_id: ref for ref in refs}
 
 
 def cited_refs(steps, refs: dict) -> list:
@@ -169,6 +195,88 @@ def compare_rows(by_year: dict) -> list[dict]:
     return rows
 
 
+class RecordingOcr:
+    """Wraps the OCR client: each document is read once per file (kept in `cache`, the
+    session's), so answering a relief question and recalculating does not run C2 again.
+    Also what pre-fills the relief form (issuer, date, total)."""
+
+    def __init__(self, inner, cache: dict, keys: dict[str, str]) -> None:
+        self.inner, self.cache, self.keys = inner, cache, keys  # keys: ref -> cache key
+
+    def extract(self, request_id: str, document: str) -> OcrResult:
+        key = self.keys[document]
+        if key not in self.cache:
+            out = self.inner.extract(request_id, document)
+            raw = getattr(self.inner, "reads", {}).get(document)
+            self.cache[key] = (out, raw, list(getattr(self.inner, "notes", [])))
+        return self.cache[key][0]
+
+    def read(self, document: str):
+        """(OcrResult, C2's raw answer or None, notes) once extracted, else None."""
+        return self.cache.get(self.keys.get(document, ""))
+
+
+class MixedOcr:
+    """Uploaded files go to live C2; picked mock invoices/receipts go to the mock client."""
+
+    def __init__(self, http, mock, mock_refs: set[str]) -> None:
+        self.http, self.mock, self.mock_refs = http, mock, mock_refs
+
+    def extract(self, request_id: str, document: str) -> OcrResult:
+        client = self.mock if document in self.mock_refs else self.http
+        return client.extract(request_id, document)
+
+    def __getattr__(self, name):  # reads, notes, visual, etc. come from live C2
+        return getattr(self.http, name)
+
+
+def named(text: str, names: dict[str, str]) -> str:
+    """'... (doc-2) ...' -> '... (solar.png, doc-2) ...': file names for this page only."""
+    return re.sub(
+        r"\bdoc-\d+\b", lambda m: f"{names[m.group()]}, {m.group()}" if m.group() in names
+        else m.group(), text,
+    )  # fmt: skip
+
+
+def relief_inputs(token: str, documents) -> tuple[DocumentInput, ...]:
+    """What the user entered in the relief panel, for the invoices/receipts of the last run.
+    Amount and date count only when the user ticked that they checked them."""
+    out = []
+    for d in documents:
+        if d.role != "relief_candidate":
+            continue
+        k = f"{token}:{d.document_id}"
+        confirmed = st.session_state.get(f"{k}:confirm", False)
+        amount = None
+        if confirmed:
+            text = (st.session_state.get(f"{k}:amount") or "").replace(",", "").strip()
+            try:
+                amount = Decimal(text) if text else None
+            except InvalidOperation:
+                amount = None
+        answers = {
+            key.rsplit(":", 1)[1]: st.session_state[key].lower()
+            for key in st.session_state
+            if isinstance(key, str)
+            and key.startswith(f"{k}:q:")
+            and st.session_state[key] in ("Yes", "No")
+        }
+        out.append(
+            DocumentInput(
+                document=d.document_id,
+                payment_for=(st.session_state.get(f"{k}:for") or "").strip() or None,
+                amount_paid=amount if amount is not None and amount >= 0 else None,
+                document_date=st.session_state.get(f"{k}:date") if confirmed else None,
+                answers=answers,
+            )
+        )
+    return tuple(out)
+
+
+def recalculate() -> None:
+    st.session_state["recalc"] = True
+
+
 def tampered_markdown(t: Tampering) -> list[str]:
     """The rejected rewrite, one line per step, with the changed figure and citation marked."""
     out = []
@@ -190,22 +298,47 @@ st.caption("C1 demo · the engine does the math, the LLM only rephrases · law f
 
 with st.sidebar:
     st.header("Input")
-    mode = st.radio("Source", ["Type amounts", "Mock payslip", "Upload payslip (live C2 OCR)"])
+    mode = st.radio("Source", ["Type amounts", "Mock payslip", "Upload documents (live C2 OCR)"])
     env_now = load_env()
     income = apit = None
     docs: tuple[str, ...] = ()
-    upload = None
+    uploads = []
+    extra_mock: tuple[str, ...] = ()
+    show_boxes = False
     c2_url = env_now.get("C2_API_URL", C2_DEFAULT_URL)
-    if mode == "Type amounts":
-        income = to_decimal(st.text_input("Employment income (Rs)", "3000000"), "Income")
-        apit = to_decimal(st.text_input("APIT already paid (Rs)", "50000"), "APIT")
-    elif mode == "Mock payslip":
-        docs = (PAYSLIPS[st.selectbox("Payslip", list(PAYSLIPS))],)
-    else:
-        upload = st.file_uploader("Payslip photo, scan or PDF", type=UPLOAD_TYPES)
+    if mode == "Upload documents (live C2 OCR)":
+        uploads = st.file_uploader(
+            "Payslip, invoices, receipts (photo, scan or PDF)",
+            type=UPLOAD_TYPES,
+            accept_multiple_files=True,
+            help="One payslip at most. Invoices and receipts are checked for reliefs.",
+        )
         covers = st.selectbox("The payslip covers", list(PAYSLIP_COVERS))
+        st.caption("No payslip? Type the income instead (typed amounts win over the payslip).")
+        income = to_decimal(st.text_input("Employment income (Rs), optional", ""), "Income")
+        apit = to_decimal(st.text_input("APIT already paid (Rs), optional", ""), "APIT")
         show_boxes = st.toggle("Show where C2 read each value", value=True)
+        extra_mock = tuple(
+            MOCK_RELIEF_DOCS[p]
+            for p in st.multiselect(
+                "Add mock invoices / receipts (offline)",
+                list(MOCK_RELIEF_DOCS),
+                help="Backup for the demo: mock documents added to your uploads.",
+            )
+        )
         st.caption(f"C2 API: {c2_url}")
+    else:
+        if mode == "Type amounts":
+            income = to_decimal(st.text_input("Employment income (Rs)", "3000000"), "Income")
+            apit = to_decimal(st.text_input("APIT already paid (Rs)", "50000"), "APIT")
+        else:
+            docs = (PAYSLIPS[st.selectbox("Payslip", list(PAYSLIPS))],)
+        picked = st.multiselect(
+            "Invoices / receipts (mock C2)",
+            list(MOCK_RELIEF_DOCS),
+            help="Offline documents, checked for reliefs. Pick none for the payslip-only flow.",
+        )
+        docs += tuple(MOCK_RELIEF_DOCS[p] for p in picked)
 
     st.header("Law (C3)")
     live_c3 = st.toggle(
@@ -243,55 +376,98 @@ with st.sidebar:
     )
     go = st.button("Calculate", type="primary", width="stretch")
 
-if not go:
+# ---------------- run ----------------
+# Calculate starts a run; Recalculate (relief panel) runs again with the user's answers. The
+# result is kept in the session, so answering a question redraws the page without a run.
+recalc = st.session_state.pop("recalc", False)
+if go or recalc:
+    st.session_state["view"] = None
+    llm = None
+    if demo_tamper:  # replaces Gemini entirely: no key, no network
+        llm = TamperedRewriteLLM()
+    elif use_gemini:
+        env = load_env()
+        env["C1_EXPLAINER_LLM"] = "gemini"
+        try:
+            llm = explainer_llm_from_env(env)
+        except ValueError as e:
+            st.error(str(e))
+            st.stop()
+
+    cache = st.session_state.setdefault("ocr_cache", {})
+    if mode.startswith("Upload"):
+        if not uploads and not extra_mock:
+            st.error("Upload a payslip, invoice or receipt first")
+            st.stop()
+        http = HttpOcrClient(c2_url, months_covered=PAYSLIP_COVERS[covers])
+        uploaded = tuple(http.add(f.name, f.getvalue()) for f in uploads)
+        docs = uploaded + extra_mock
+        names = {ref: f.name for ref, f in zip(uploaded, uploads, strict=True)}
+        names |= {
+            doc_id(n): f"{ref}.json (mock)"
+            for n, ref in enumerate(docs, start=1)
+            if ref in extra_mock
+        }
+        keys = {
+            ref: f"c2:{PAYSLIP_COVERS[covers]}:{hashlib.sha256(f.getvalue()).hexdigest()}"
+            for ref, f in zip(uploaded, uploads, strict=True)
+        }
+        keys |= {ref: f"mock:{ref}" for ref in extra_mock}
+        c2 = MixedOcr(http, MockOcrClient(), set(extra_mock)) if extra_mock else http
+    else:
+        c2 = MockOcrClient()
+        names = {doc_id(n): f"{ref}.json (mock)" for n, ref in enumerate(docs, start=1)}
+        keys = {ref: f"mock:{ref}" for ref in docs}
+    ocr = RecordingOcr(c2, cache, keys)
+    # relief answers are kept per set of documents: a new set starts with an empty form
+    token = hashlib.sha256(repr(sorted(keys.values())).encode()).hexdigest()[:12]
+    previous = st.session_state.get("last_documents")
+    document_inputs = relief_inputs(token, previous) if previous is not None else ()
+
+    retrieval = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
+    assurance = assurance_client_from_env(c4_env)
+    if force_regen:
+        assurance = MockAssuranceClient(["REGENERATE"])
+    deps = Deps(  # built fresh each run: the assurance mock consumes its script
+        ocr=ocr,
+        retrieval=retrieval,
+        assurance=assurance,
+        explainer_llm=llm,
+    )
+    request = TaxRequest(
+        request_id=f"req-{random.randint(1, 9999):04d}",
+        year_of_assessment=year,
+        employment_income=income,
+        apit_paid=apit,
+        documents=docs,
+        document_inputs=document_inputs,
+    )
+
+    with st.spinner("Running pipeline..."):
+        try:
+            result = run(request, deps)
+        except Exception as e:  # show it on screen, don't crash the demo
+            st.exception(e)
+            st.stop()
+    st.session_state["last_documents"] = result.documents
+    st.session_state["view"] = dict(
+        result=result, request=request, ocr=ocr, c2=c2, names=names, token=token, docs=docs,
+        retrieval=retrieval, assurance=assurance, llm=llm, demo_tamper=demo_tamper,
+        show_boxes=show_boxes, live_c3=live_c3, c3_url=c3_url,
+    )  # fmt: skip
+
+view = st.session_state.get("view")
+if view is None:
     st.info("Pick an input on the left and press **Calculate**.")
     st.stop()
-
-# ---------------- run ----------------
-llm = None
-if demo_tamper:  # replaces Gemini entirely: no key, no network
-    llm = TamperedRewriteLLM()
-elif use_gemini:
-    env = load_env()
-    env["C1_EXPLAINER_LLM"] = "gemini"
-    try:
-        llm = explainer_llm_from_env(env)
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
-
-ocr = MockOcrClient()
-if mode.startswith("Upload"):
-    if upload is None:
-        st.error("Upload a payslip first")
-        st.stop()
-    ocr = HttpOcrClient(c2_url, months_covered=PAYSLIP_COVERS[covers])
-    docs = (ocr.add(upload.name, upload.getvalue()),)
-
-retrieval = HttpRetrievalClient(c3_url) if live_c3 else MockRetrievalClient()
-assurance = assurance_client_from_env(c4_env)
-if force_regen:
-    assurance = MockAssuranceClient(["REGENERATE"])
-deps = Deps(  # built fresh each run: the assurance mock consumes its script
-    ocr=ocr,
-    retrieval=retrieval,
-    assurance=assurance,
-    explainer_llm=llm,
+# the run being shown: the sidebar may have changed since, and is used from the next run
+result, request, ocr, c2, names, token, docs = (
+    view[k] for k in ("result", "request", "ocr", "c2", "names", "token", "docs")
 )
-request = TaxRequest(
-    request_id=f"req-{random.randint(1, 9999):04d}",
-    year_of_assessment=year,
-    employment_income=income,
-    apit_paid=apit,
-    documents=docs,
+retrieval, assurance, llm, demo_tamper = (
+    view[k] for k in ("retrieval", "assurance", "llm", "demo_tamper")
 )
-
-with st.spinner("Running pipeline..."):
-    try:
-        result = run(request, deps)
-    except Exception as e:  # show it on screen, don't crash the demo
-        st.exception(e)
-        st.stop()
+show_boxes, live_c3, c3_url = (view[k] for k in ("show_boxes", "live_c3", "c3_url"))
 
 # ---------------- UI: output ----------------
 STATUS_BOX.get(result.status, st.info)(
@@ -299,17 +475,17 @@ STATUS_BOX.get(result.status, st.info)(
 )
 
 calc = result.calc
-refs = rule_refs(result.rules)
+refs = rule_refs(result.rules, result.reliefs)
 if calc:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Employment income", rs(calc.employment_income))
-    c2.metric("Total tax", rs(calc.total_tax))
+    m1, m2, m3, m4 = st.columns(4)  # not c2: that name is the C2 client used below
+    m1.metric("Employment income", rs(calc.employment_income))
+    m2.metric("Total tax", rs(calc.total_tax))
     if calc.refund > 0:
-        c3.metric("Refund due", rs(calc.refund))
+        m3.metric("Refund due", rs(calc.refund))
     else:
-        c3.metric("Tax payable", rs(calc.tax_payable))
+        m3.metric("Tax payable", rs(calc.tax_payable))
     if result.confidence:
-        c4.metric("Confidence", f"{result.confidence.score:.2f}")
+        m4.metric("Confidence", f"{result.confidence.score:.2f}")
 
     st.subheader("Calculation steps")
     st.dataframe(
@@ -378,9 +554,97 @@ if calc:
             if r.calc is None:
                 st.error(f"YA {ya}: {'; '.join(r.review_reasons) or r.status}")
 
-read = getattr(ocr, "last", None)
-if read is not None:
-    st.subheader(f"Document read by C2 OCR · {read.get('doc_id')} ({read.get('document_type')})")
+if result.documents:
+    st.subheader("Documents and reliefs")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "File": names.get(d.document_id, ""),
+                    "Id": d.document_id,
+                    "Type": d.document_type,
+                    "Used as": d.role.replace("_", " "),
+                    "Note": d.note,
+                }
+                for d in result.documents
+            ]
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+    st.caption(
+        "Ids, not file names, are what C1 passes on (C2, C3, C4, messages). "
+        "A relief is applied only on the amount and date you confirm and with every "
+        "question answered Yes. Change anything, then press **Recalculate**."
+    )
+    for d in (x for x in result.documents if x.role == "relief_candidate"):
+        found = [f for f in result.relief_findings if f.document_id == d.document_id]
+        read = ocr.read(docs[result.documents.index(d)])  # doc-<n> is the n-th of docs
+        pre = read[0] if read else None
+        k = f"{token}:{d.document_id}"
+        with st.container(border=True):
+            st.markdown(f"**{md_escape(names.get(d.document_id, d.document_id))}** · "
+                        f"`{d.document_id}` · {d.document_type}")  # fmt: skip
+            if pre is not None and pre.issuer:
+                st.caption(f"Issuer read by C2: {pre.issuer}")
+            for f in found:
+                label, color = RELIEF_BADGE[f.status]
+                st.badge(f"{f.title or 'Relief'} · {label}" if f.title else label, color=color)
+                for reason in f.reasons:
+                    st.markdown(f"- {md_escape(named(reason, names))}")
+                if f.status == "applied" and f.remaining_claimable:
+                    st.caption(
+                        f"{rs(f.remaining_claimable)} paid above this year's limit: shown only, "
+                        "not applied to any other year."
+                    )
+                if f.citation:
+                    st.caption(f"Law: {f.citation}" + (f" · `{f.rule_id}`" if f.rule_id else ""))
+                if f.rule_text:
+                    with st.expander("C3's text, conditions included"):
+                        st.text(f.rule_text)
+            left_r, right_r = st.columns(2)
+            left_r.text_input(
+                "What was this payment for?",
+                key=f"{k}:for",
+                help="Sent to C3 with the issuer to find the relief (contact details removed).",
+            )
+            right_r.text_input(
+                "Amount paid (Rs)",
+                value=f"{pre.total_amount:.2f}" if pre is not None and pre.total_amount else "",
+                key=f"{k}:amount",
+            )
+            left_r.date_input(
+                f"Date on the {d.document_type}",
+                value=pre.document_date if pre is not None else None,
+                min_value=date(2018, 4, 1),
+                key=f"{k}:date",
+            )
+            right_r.checkbox(
+                f"I checked the amount and date against the {d.document_type}",
+                key=f"{k}:confirm",
+                help="C2's reading only pre-fills these; it is not used until you confirm.",
+            )
+            questions = {q.question_id: q for f in found for q in f.questions}
+            for q in questions.values():
+                st.radio(
+                    q.text,
+                    ANSWERS,
+                    index=ANSWERS.index(q.answer.capitalize()) if q.answer else 0,
+                    horizontal=True,
+                    key=f"{k}:q:{q.question_id}",
+                )
+    st.button("Recalculate with these answers", type="primary", on_click=recalculate)
+
+for ref in docs:
+    read = ocr.read(ref)
+    if read is None or read[1] is None:  # mock C2, or C2 did not answer
+        continue
+    out, raw, notes = read
+    n = docs.index(ref) + 1
+    st.subheader(
+        f"Document read by C2 OCR · {names.get(doc_id(n), ref)} ({doc_id(n)}, "
+        f"{raw.get('document_type')})"
+    )
     left_doc, right_doc = st.columns([3, 2]) if show_boxes else (st.container(), None)
     with left_doc:
         st.dataframe(
@@ -395,26 +659,31 @@ if read is not None:
                         "Needs review": "yes" if f["needs_review"] else "",
                         "Used by C1 as": C2_TO_C1_FIELDS.get(f["field_name"], ""),
                     }
-                    for f in read["extracted_fields"]
+                    for f in raw["extracted_fields"]
                 ]
             ),
             hide_index=True,
             width="stretch",
         )
         st.caption(
-            f"C2 overall confidence {read.get('overall_confidence')} · "
-            f"needs review: {'yes' if read.get('needs_review') else 'no'}"
+            f"C2 overall confidence {raw.get('overall_confidence')} · "
+            f"needs review: {'yes' if raw.get('needs_review') else 'no'}"
         )
-        for note in ocr.notes:
+        for note in notes:
             st.info(f"Annualised: {note}")
     if right_doc is not None:
         with right_doc:
+            boxes = st.session_state.setdefault("c2_boxes", {})
+            key = ocr.keys[ref]
             try:
-                st.image(ocr.visual(docs[0]), caption="Green = trusted, orange = needs review")
+                if key not in boxes:
+                    boxes[key] = c2.visual(ref)
+                st.image(boxes[key], caption="Green = trusted, orange = needs review")
             except ComponentUnavailable as e:
                 st.caption(f"Boxes not available: {e}")
 
-law = getattr(retrieval, "last", None)
+# C3's first answer is the rules (personal relief, bands); the rest are relief queries
+law = next(iter(getattr(retrieval, "answers", [])), None)
 if law is not None:
     st.subheader(f"Law used · from C3 GraphRAG, in force on {law.query.as_of_date}")
     st.dataframe(
@@ -512,7 +781,7 @@ with left:
 with right:
     st.subheader("Checks")
     for r in result.review_reasons:
-        st.warning(f"Review: {r}")
+        st.warning(f"Review: {named(r, names)}")
     for c in result.conflicts:
         st.error(f"Conflict: {c}")
     for w in result.warnings:

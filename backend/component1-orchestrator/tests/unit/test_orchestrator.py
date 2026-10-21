@@ -255,7 +255,7 @@ def test_honest_explainer_rewrite_is_delivered_and_logged_in_the_trace():
     assert (call.stage, call.model, call.prompt_version, call.temperature) == (
         "explain",
         "fake-explainer-001",
-        "explain-v3",
+        "explain-v4",
         0,
     )
     assert trace.explanation == result.explanation

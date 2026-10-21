@@ -29,13 +29,27 @@ RERUN_TARGETS = ("retrieve", "calculate", "explain")
 
 def build_graph(deps: Deps):
     graph = StateGraph(PipelineState)
-    nodes = (*LINEAR, ("regenerate", stages.regenerate), ("deliver", stages.deliver))
+    nodes = (
+        *LINEAR,
+        ("discover_reliefs", stages.discover_reliefs),
+        ("regenerate", stages.regenerate),
+        ("deliver", stages.deliver),
+    )
     for name, fn in nodes:
         graph.add_node(name, _node(name, fn, deps))
 
     graph.add_edge(START, LINEAR[0][0])
     for (a, _), (b, _) in zip(LINEAR, LINEAR[1:], strict=False):
-        graph.add_edge(a, b)
+        if a != "retrieve":
+            graph.add_edge(a, b)
+    # Only a request with an invoice/receipt visits discover_reliefs, so the others run the
+    # same stages as before. A rerun from "retrieve" re-discovers the reliefs too.
+    graph.add_conditional_edges(
+        "retrieve",
+        stages.has_relief_candidates,
+        {"discover_reliefs": "discover_reliefs", "calculate": "calculate"},
+    )
+    graph.add_edge("discover_reliefs", "calculate")
     graph.add_conditional_edges(
         "assure", stages.after_assure, {"regenerate": "regenerate", "deliver": "deliver"}
     )

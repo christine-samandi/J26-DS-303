@@ -1,0 +1,60 @@
+{
+  "_comment": "Copied from C3 knowledge_graph/reliefs.py RELIEFS[*].keywords (dev c590e0b). Used only by C1's MockRetrievalClient to pick which mock relief a query names.",
+  "keywords": {
+    "employment_relief": [
+      "employment relief"
+    ],
+    "rental_relief": [
+      "rent relief",
+      "rental relief",
+      "rental income",
+      "rent income",
+      "rent",
+      "rental",
+      "landlord",
+      "house rent"
+    ],
+    "senior_citizen_interest_relief": [
+      "senior citizen",
+      "senior citizens",
+      "senior",
+      "elderly"
+    ],
+    "foreign_currency_service_relief": [
+      "foreign currency",
+      "foreign exchange",
+      "export of services",
+      "exported services",
+      "freelance",
+      "freelancer",
+      "foreign clients"
+    ],
+    "qualifying_expenditure_relief": [
+      "expenditure relief",
+      "qualifying expenditure",
+      "medical",
+      "health expenditure",
+      "health insurance",
+      "medical insurance",
+      "medical expenses",
+      "education expenses",
+      "educational expenditure",
+      "school fees",
+      "tuition",
+      "housing loan",
+      "home loan",
+      "pension scheme",
+      "treasury bond",
+      "treasury bill",
+      "shares"
+    ],
+    "solar_panel_relief": [
+      "solar",
+      "solar panel",
+      "solar panels",
+      "solar power",
+      "solar energy",
+      "rooftop solar"
+    ]
+  }
+}

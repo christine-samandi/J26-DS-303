@@ -11,7 +11,10 @@ A rewrite passes only if it has one line per step, same step_ids, same order, an
   - carries exactly the step's citation tags, each naming a rule in `rules_used`,
   - names no year of assessment ("2025/26", "2025-2026") but the request's own, when the
     caller passes it; the request's own is then not read as numbers. Without it, a year
-    is read as two numbers like any other and so rejected.
+    is read as two numbers like any other and so rejected,
+  - keeps where an amount came from: a line whose template says the amount was confirmed by
+    the user must still say "confirm..."; no line may say an amount was read by OCR or
+    scanned unless its template does.
 
 Failures are split in two: a changed/added number or citation is a hallucination; a
 malformed reply (bad JSON, missing or reordered steps) is only a structural failure.
@@ -39,6 +42,8 @@ _UNITS = (
 ).split()
 _TENS = "thirty forty fifty sixty seventy eighty ninety".split()
 _SCALES = "hundred thousand lakh million billion crore".split()
+_CONFIRMED = re.compile(r"\bconfirm", re.I)
+_READ_BY_MACHINE = re.compile(r"\b(?:OCR|scann(?:ed|ing)|read (?:by|from))\b", re.I)
 _NUMBER_WORD = re.compile(
     r"\b(?:" + "|".join([*_UNITS, *_TENS, *(f"{w}s?" for w in _SCALES)]) + r"|per\s*cent)\b",
     re.I,
@@ -132,6 +137,11 @@ def _check_line(
             problems.append(f"{sid}: cites {tag!r}, which is not in rules_used")
     if sorted(set(tags)) != sorted(set(step.citation_refs)):
         problems.append(f"{sid}: citations {sorted(set(tags))} != {sorted(step.citation_refs)}")
+
+    if _CONFIRMED.search(template) and not _CONFIRMED.search(text):
+        problems.append(f"{sid}: drops that the amount was confirmed by the user")
+    if _READ_BY_MACHINE.search(text) and not _READ_BY_MACHINE.search(template):
+        problems.append(f"{sid}: says an amount was read from a document, which it was not")
     return problems
 
 

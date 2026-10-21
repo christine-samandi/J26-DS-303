@@ -91,3 +91,18 @@ def _sub_outside_brackets(text: str, pattern: re.Pattern[str], kind: str, placeh
 
     parts = _BRACKETED.split(text)
     return "".join(p if i % 2 else pattern.sub(swap, p) for i, p in enumerate(parts))
+
+
+_CONTACT_IDS = ("EMAIL", "NIC", "PHONE")
+
+
+def strip_identifiers(text: str) -> str:
+    """`text` without e-mail addresses, NIC numbers and phone numbers (removed, not mapped).
+
+    For text that is not about the taxpayer but may carry their identifiers, such as an
+    invoice issuer line sent to C3: the business name must stay so C3 can match it.
+    """
+    for kind, pattern in _PATTERNS:
+        if kind in _CONTACT_IDS:
+            text = pattern.sub(" ", text)
+    return " ".join(text.split())
