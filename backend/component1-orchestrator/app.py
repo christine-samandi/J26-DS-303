@@ -294,7 +294,8 @@ def law_updates_box(c3_url: str, show_impact: bool) -> None:
             lines = "\n".join(f"- {md_escape(h.summary)}" for h in hits)
             st.warning(
                 f"**The law changed after your last calculation** (YA {last['ya']}, made "
-                f"{last['at']:%H:%M}):\n{lines}\n\nPress **Calculate** again to use the new law."
+                f"{last['at'].astimezone():%H:%M}):\n{lines}\n\n"
+                "Press **Calculate** again to use the new law."
             )
     if items:
         with st.sidebar.expander(f"Law updates ({len(items)})"):
@@ -302,6 +303,23 @@ def law_updates_box(c3_url: str, show_impact: bool) -> None:
                 st.markdown(f"**{md_escape(n['title'])}** · {n['created_at'][:10]}")
                 for c in n.get("changes", [])[:8]:
                     st.markdown(f"- {md_escape(c['summary'])}")
+
+
+LAW_CHECK_EVERY = os.getenv("C1_LAW_CHECK_EVERY", "30s")  # how often the page asks C3
+
+
+@st.fragment(run_every=LAW_CHECK_EVERY)
+def law_watch(c3_url: str) -> None:
+    """Asks C3 in the background; when a new law change arrives, reruns the page so the
+    warning and the Law updates box appear without the user doing anything."""
+    try:
+        count = len(fetch_notifications(c3_url))
+    except ComponentUnavailable:
+        return  # law_updates_box already says why
+    seen = st.session_state.setdefault("law_count", count)
+    if count != seen:
+        st.session_state["law_count"] = count
+        st.rerun()
 
 
 def tampered_markdown(t: Tampering) -> list[str]:
@@ -377,7 +395,11 @@ with st.sidebar:
     if live_c3:
         st.caption(f"C3 API: {c3_url}")
         year = st.selectbox("Year of assessment", LIVE_YEARS)
-        st.button("Check for law updates", help="Ask C3 whether the law changed (no calculation)")
+        st.button(
+            "Check for law updates",
+            help="Ask C3 now whether the law changed (no "
+            "calculation). The page also checks by itself every 30 s.",
+        )
     else:
         year = st.selectbox("Year of assessment", MOCK_YEARS)
         st.caption("Mock rules (C1 stand-in for C3)")
@@ -486,6 +508,7 @@ if go or recalc:
 
 if live_c3:
     law_updates_box(c3_url, show_impact=not (go or recalc))
+    law_watch(c3_url)
 
 view = st.session_state.get("view")
 if view is None:

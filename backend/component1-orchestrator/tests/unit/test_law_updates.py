@@ -115,3 +115,24 @@ def test_page_warns_when_the_law_changed_after_the_last_calculation(c3, monkeypa
     assert "The law changed after your last calculation" in warning.value
     assert "Rs. 1,800,000, from 2025-04-01" in warning.value
     assert any(e.label == "Law updates (1)" for e in at.expander)
+
+
+def test_the_page_checks_for_law_changes_by_itself(c3, monkeypatch):
+    AppTest = pytest.importorskip("streamlit.testing.v1").AppTest
+    items = []  # C3 has no law change yet
+    server = c3(items)
+    monkeypatch.setenv("C1_RETRIEVAL", "http")
+    monkeypatch.setenv("C3_API_URL", server.url)
+    app = Path(__file__).resolve().parents[2] / "app.py"
+    at = AppTest.from_file(str(app), default_timeout=60)
+    at.session_state["last_calc"] = {
+        "at": datetime(2026, 10, 21, 8, 0, tzinfo=UTC),
+        "ya": "2025/26", "as_of": date(2025, 4, 1), "rule_ids": USED_V3,
+    }  # fmt: skip
+    at.run()
+    assert not at.exception and not at.warning
+    assert at.session_state["law_count"] == 0  # the background check has run
+    items.append(CHANGE_2025)  # an Act is added in C3
+    at.run()  # what the timed check triggers
+    assert not at.exception and at.session_state["law_count"] == 1
+    assert "The law changed after your last calculation" in at.warning[0].value
