@@ -136,6 +136,13 @@ def check_item(qty: Optional[float], rate: Optional[float], amount: Optional[flo
                       rate, amount)
 
 
+def _rate_ok(v: Dict[str, float], tax_keys: Sequence[str]) -> bool:
+    taxable = v.get("subtotal", 0.0) - v.get("discount", 0.0)
+    tax_total = sum(v.get(k, 0.0) for k in tax_keys)
+    return taxable > 0 and tax_total > 0 and \
+        any(abs(tax_total / taxable - r) <= RATE_TOL for r in KNOWN_RATES.values())
+
+
 def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str, float]) -> InvoiceChecks:
     """values: amount fields (subtotal, discount, vat, sscl, total_amount, amount_paid, balance_due,
     previous_balance); items: dicts with quantity, unit_price, amount, discount, tax_rate;
@@ -146,9 +153,6 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
     checks: List[Check] = []
     item_results = [check_item(i.get("quantity"), i.get("unit_price"), i.get("amount"),
                                i.get("discount"), i.get("tax_rate")) for i in items]
-    for n, r in enumerate(item_results, 1):
-        if r.passed is not None:
-            checks.append(Check(f"line {n}: quantity x rate = amount", False, r.passed, r.explanation))
 
     # Lost decimal points across the table: q x r = a also holds with r/100 and a/100, so a row
     # alone cannot tell '4150000' from 41,500.00. The lines must add up to the printed subtotal (or
@@ -169,6 +173,11 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
                 q = items[k].get("quantity")
                 r.explanation = ((f"{q:g} x {money(r.unit_price)} = " if q is not None and r.unit_price is not None else "")
                                  + f"{money(r.amount)} (decimal point restored: the lines then add up to the subtotal)")
+
+    # line checks are reported AFTER the table-level repair, so they show the repaired values
+    for n, r in enumerate(item_results, 1):
+        if r.passed is not None or r.repaired:
+            checks.append(Check(f"line {n}: quantity x rate = amount", False, r.passed is not False, r.explanation))
 
     eqs: List[Equation] = []
     amounts = [r.amount for r in item_results if r.amount is not None]
@@ -222,6 +231,8 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
             trial = dict(v, **{f: new})
             if any(e.holds(v) and not e.holds(trial) for e in eqs):
                 continue
+            if _rate_ok(v, tax_keys) and not _rate_ok(trial, tax_keys):
+                continue          # a tax that is exactly 18% of the subtotal is not the misread value
             scored.append((sum(e.holds(trial) for e in eqs), f, new))
         scored.sort(key=lambda x: x[0], reverse=True)
         if not scored or (len(scored) > 1 and scored[0][0] == scored[1][0]):

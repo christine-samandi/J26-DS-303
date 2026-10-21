@@ -334,3 +334,125 @@ def test_photo_invoice_lost_decimals_and_discount():
     assert f["document_number"].value == "SSS/INV/2026/0417" and f["document_date"].value == "2026-08-14"
     for rule in ("items_sum", "totals_chain", "balance", "implied tax rate"):
         assert check(report, rule)["passed"], rule
+
+
+# --- 8. Bilingual donation receipt photo: two-line labels, value beside them, charity reg no -------
+# Layout of a real Sri Lankan charity receipt (names and numbers invented): every label is English
+# over Sinhala and its value is printed to the right, between the two lines, so OCR puts the value
+# on a line of its own. The charity registration number follows the address and must NOT be masked:
+# Component 3 needs it to check the approved-charity condition of the donation relief.
+def bilingual_receipt(date_label=True):
+    return [
+        [("BIG", 60, "KARUNA CHILD CARE FOUNDATION")],
+        [(60, "No. 12, Lake Road, Kandy")],
+        [(60, "Charity Reg No: GA/2019/0101")],
+        [("BIG", 360, "DONATION RECEIPT")],
+        [(60, "Receipt No")], [(560, "KCF/DR/2026/0042")], [(60, "ලදුපත් අංකය")],
+        [(60, "Date" if date_label else "")], [(560, "27/09/2026")], [(60, "දිනය")],
+        [(60, "Received From")], [(560, "Mr. A. B. Perera")], [(60, "ලැබුණේ")],
+        [(60, "Purpose")], [(560, "School books for children")], [(60, "අරමුණ")],
+        [(60, "Amount")], [(560, "Rs. 25,000.00")], [(60, "මුදල")],
+        [(60, "Amount in words")], [(560, "Rupees Twenty Five Thousand Only")],
+        [(60, "Payment"), (560, "Bank Transfer")],
+    ]
+
+
+def _rows(rows):
+    return [[c for c in r if (c[2] if c[0] == "BIG" else c[1])] for r in rows if any(
+        (c[2] if c[0] == "BIG" else c[1]) for c in r)]
+
+
+def test_bilingual_receipt_values_beside_two_line_labels():
+    out, report, f = run(_rows(bilingual_receipt()))
+    assert out.document_type == "receipt"
+    assert f["seller_reg_no"].value == "GA/2019/0101"            # kept: it identifies the charity
+    assert f["document_number"].value == "KCF/DR/2026/0042"
+    assert f["document_date"].value == "2026-09-27"
+    assert f["total_amount"].value == 25000.0
+    attrs = {a.key: a.value for a in out.attributes}
+    assert attrs["Purpose"] == "School books for children" and attrs["Payment"] == "Bank Transfer"
+    assert "Perera" not in out.model_dump_json()                  # the donor stays masked
+    assert check(report, "amount in words = amount in figures")["passed"]
+
+
+def test_receipt_date_without_readable_label():
+    out, report, f = run(_rows(bilingual_receipt(date_label=False)))
+    assert f["document_date"].value == "2026-09-27"
+    assert f["document_date"].confidence <= 0.6                  # weaker evidence: no label
+    assert "only date" in " ".join(report["notes"]["document_date"])
+
+
+# --- 9. Bilingual solar quotation photo: two-line header, right-aligned rate, totals beside words --
+QUOTE = [
+    [(60, "SURYA SOLAR SOLUTIONS (PVT) LTD")],
+    [(60, "VAT Reg No: 100200300-7000")],
+    [("BIG", 400, "QUOTATION")],
+    [(60, "Bill To"), (700, "Quotation No."), (940, "$8S/QT/2026/0388")],
+    [(700, "Quotation Date"), (940, "02/07/2026")],
+    [(700, "Valid Until"), (940, "01/08/2026")],
+    [(60, "Item"), (440, "Type"), (680, "Qty"), (760, "Unit"), (840, "Rate"), (960, "Disc"), (1060, "Amount")],
+    [(60, "අයිතමය"), (440, "වර්ගය"), (680, "ප්‍රමාණය"), (760, "ඒකකය"), (840, "ඒකක මිල"), (960, "වට්ටම"),
+     (1060, "මුදල")],
+    [(60, "Solar PV Panel 550W"), (440, "Mono"), (690, "10"), (770, "Nos"), (860, "41,500.00"), (975, "0%"),
+     (1060, "415,000.00")],
+    [(60, "DC Cables"), (440, "6mm"), (690, "85"), (770, "m"), (900, "650.00"), (975, "0%"), (1060, "55,250.00")],
+    [(60, "Amount in words"), (800, "Sub Total"), (1100, "470,250.00")],
+    [(60, "Rupees Five Lakh Fifty Four Thousand"), (800, "VAT 18%"), (1100, "84,645.00")],
+    [(60, "Eight Hundred Ninety Five Only"), (800, "Total"), (1100, "554,895.00")],
+    [(60, "Prices valid for 30 days.")],
+]
+
+
+def test_quotation_two_line_header_and_right_aligned_rate():
+    out, report, f = run(QUOTE)
+    assert out.document_type == "quotation"
+    items = out.line_items
+    assert len(items) == 2 and items[1].unit_price == 650.0 and items[1].amount == 55250.0   # not 'Disc'
+    assert "අයිතමය" not in items[0].description                    # the Sinhala header line is not a description
+    assert f["subtotal"].value == 470250.0 and f["vat"].value == 84645.0 and f["total_amount"].value == 554895.0
+    assert check(report, "items_sum")["passed"] and check(report, "totals_chain")["passed"]
+
+
+def test_quotation_dates_and_reference_prefix():
+    out, report, f = run(QUOTE)
+    assert f["document_date"].value == "2026-07-02"                # Quotation Date, never 'Valid Until'
+    c = check(report, "valid until after the quotation date")
+    assert c["passed"] and "30 days" in c["explanation"]
+    assert f["document_number"].value == "SSS/QT/2026/0388"        # '$8S' restored from Surya Solar Solutions
+
+
+def test_initials_fix_only_for_look_alikes():
+    from entity_extraction.invoice import initials_fix
+    assert initials_fix("$88/QT/2026/0388", "SURYABALA SOLAR SOLUTIONS (PVT) LTD") == "SSS/QT/2026/0388"
+    assert initials_fix("SSS/INV/2026/1", "SURYABALA SOLAR SOLUTIONS (PVT) LTD") is None     # already letters
+    assert initials_fix("458-5300116009", "Electricity Distribution Lanka (Private) Limited") is None
+    assert initials_fix("2026/0417", "SURYABALA SOLAR SOLUTIONS (PVT) LTD") is None          # no letters at all
+
+
+def test_date_order_from_the_pages_own_dates():
+    from entity_extraction.invoice import date_order
+    t = lambda s: Tok(s, 0.9, [0, 0, 10, 10])
+    assert date_order([t("Date:"), t("10/14/2026"), t("11/04/2026")]) == "mdy"      # a 14th month is impossible
+    assert date_order([t("27/09/2026")]) == "dmy"
+    assert date_order([t("27/09/2026"), t("10/14/2026")]) is None                    # mixed: decides nothing
+    assert date_order([t("02/07/2026")]) is None
+
+
+# --- 10. Privacy on two-column letterheads: brand and seller TIN kept, buyer masked -----------------
+def test_two_column_letterhead_masks_only_the_address_column():
+    from privacy import mask_tokens
+    toks = page([
+        [(60, "Supplier's TIN : 114115983")],
+        [(60, "Acme"), (900, "Mr. A. B. Perera")],
+        [(60, "Acme Broadband Networks (Pvt) Ltd"), (900, "No. 12, Lake Road")],
+        [(60, "Invoice Date 14/08/2026"), (900, "Kandy")],
+        [(60, "No. 7, Church Lane, Negombo")],
+        [(60, "Charity Reg No: GA/2018/0473")],
+    ])
+    masked, _ = mask_tokens(toks)
+    text = " ".join(t.text for t in masked)
+    assert "114115983" in text                      # the seller's TIN is not personal data
+    assert text.count("Acme") == 2                  # the brand next to the buyer's block stays
+    assert "Invoice Date 14/08/2026" in text        # a label beside the address column stays
+    assert "GA/2018/0473" in text                   # registration line after an address stays
+    assert "Perera" not in text and "Lake" not in text and "Kandy" not in text

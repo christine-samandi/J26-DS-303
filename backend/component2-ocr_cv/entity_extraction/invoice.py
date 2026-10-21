@@ -94,6 +94,7 @@ PII_KEY = re.compile(r"name|address|phone|mobile|e-?mail|contact|location|nic\b|
                      r"subscription|contract|premises|walk order|නම|ලිපිනය|දුරකථන", re.I)
 CURRENCY = re.compile(r"^(?:rs\.?|lkr\.?|£|\$|€|₹|රු\.?|ரூ\.?)", re.I)
 PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+JUNK = "[]|{}!’‘'\"`"              # table rule lines read as characters at the end of a number
 GAP_FACTOR, GAP_MIN = 2.0, 24       # a gap wider than 2 letter-heights starts a new segment
 MAX_LABEL_WORDS = 9                 # longer runs of words are sentences, not labels
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
@@ -108,7 +109,7 @@ KNOWN_FACTS = ["units exported", "export rate", "charge for units exported", "un
                "system size", "system capacity", "capacity", "number of panels", "panel", "inverter", "tariff",
                "connection", "bill period", "billing period", "grid connection", "purpose", "valid until",
                "project type", "roof type", "mounting system", "expected start date", "expected completion",
-               "payment", "premises id", "month"]
+               "payment", "payment method", "premises id", "month"]
 SELLER_HINTS = re.compile(r"\b(foundation|trust|society|sabha|enterprises?|traders|solutions|installations?|"
                           r"engineering|electricals?|hardware|stores)\b", re.I)
 TITLE_WORDS = {"invoice", "tax invoice", "receipt", "quotation", "estimate", "bill", "statement", "donation receipt"}
@@ -173,7 +174,9 @@ def _is_num(t) -> bool:
 
 
 def _numeric_seg(seg) -> bool:
-    return bool(seg) and all(_is_num(t) for t in seg)
+    """All tokens are numbers; stray marks with no letter or digit ('’', '|') are ignored."""
+    real = [t for t in seg if any(c.isalnum() for c in t.text)]
+    return bool(real) and all(_is_num(t) for t in real)
 
 
 def head(seg) -> Tuple[list, list]:
@@ -285,19 +288,20 @@ def _roles_in(toks: list) -> Dict[str, Tuple[float, float]]:
     return roles
 
 
+def _header_lines(lines: List[Line], hi: int) -> List[int]:
+    ln = lines[hi]
+    h = sorted(t.bbox[3] for t in ln.tokens)[len(ln.tokens) // 2]
+    return [hi] + [lj for lj in (hi - 1, hi + 1, hi + 2)
+                   if 0 <= lj < len(lines) and abs(lines[lj].top - ln.top) <= 1.6 * h
+                   and not any(looks_numeric(t.text) and len(t.text) > 2 for t in lines[lj].tokens)]
+
+
 def header_at(lines: List[Line], hi: int) -> Dict[str, Tuple[float, float]]:
     """Header roles from line hi plus its neighbours within one text height: on a tilted photo or a
     bilingual header ('Item / අයිතමය' on two lines) the header words land on 2-3 'lines'."""
-    ln = lines[hi]
-    if any(looks_numeric(t.text) and not t.text.strip("#").isdigit() for t in ln.tokens):
+    if any(looks_numeric(t.text) and not t.text.strip("#").isdigit() for t in lines[hi].tokens):
         return {}
-    h = sorted(t.bbox[3] for t in ln.tokens)[len(ln.tokens) // 2]
-    toks = list(ln.tokens)
-    for lj in (hi - 1, hi + 1, hi + 2):
-        if 0 <= lj < len(lines) and abs(lines[lj].top - ln.top) <= 1.6 * h \
-                and not any(looks_numeric(t.text) and len(t.text) > 2 for t in lines[lj].tokens):
-            toks += lines[lj].tokens
-    return _roles_in(toks)
+    return _roles_in([t for lj in _header_lines(lines, hi) for t in lines[lj].tokens])
 
 
 def _stop_row(line: Line) -> bool:
@@ -321,9 +325,10 @@ def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
         right = max(t.bbox[0] + t.bbox[2] for l in lines for t in l.tokens)
         last = max(x for x, _ in cols.values())
         cols["amount"] = ((last + right) / 2 + 0.25 * (right - last), last + 0.5 * (right - last))
-    consumed, items, pending = {hi}, [], []
+    consumed, items, pending = set(_header_lines(lines, hi)), [], []
+    hi = max(consumed)            # rows start after every line the header words came from
     while hi + 1 < len(lines) and not any(_is_num(t) and len(t.text) > 2 for t in lines[hi + 1].tokens) \
-            and lines[hi + 1].top - lines[hi].top <= 1.6 * lines[hi].tokens[0].bbox[3]:
+            and lines[hi + 1].top - lines[hi].top <= 1.8 * sorted(t.bbox[3] for t in lines[hi].tokens)[len(lines[hi].tokens) // 2]:
         hi += 1                                   # second header line (Sinhala names under English)
         consumed.add(hi)
     num_cols = {r: x for r, (x, _) in cols.items() if r in NUMERIC_ROLES}
@@ -331,7 +336,7 @@ def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
     desc_left = cols.get("desc", (0, 0))[1]
     # numbers left of the first numeric column belong to the description ('Solar PV Panel 550W', 'Item 1')
     first_num_left = min((x0 for r, (_, x0) in cols.items() if r in NUMERIC_ROLES), default=0)
-    report = {"found": True, "header": lines[min(consumed)].text, "columns": sorted(cols, key=lambda r: cols[r][0])}
+    report = {"found": True, "header": " / ".join(lines[k].text for k in sorted(consumed)), "columns": sorted(cols, key=lambda r: cols[r][0])}
     for i in range(hi + 1, len(lines)):
         row = lines[i]
         if _stop_row(row):
@@ -350,6 +355,12 @@ def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
             cx = t.bbox[0] + t.bbox[2] / 2
             if _is_num(t) and num_cols and cx >= first_num_left:
                 role = min(num_cols, key=lambda r: abs(num_cols[r] - cx))
+                # A right-aligned number under a short heading can sit nearer the NEXT heading's centre
+                # ('650.00' under 'Rate', next to 'Disc'). A number that ends before a heading starts
+                # is not in that column: take the numeric column to its left.
+                left_cols = [r for r in num_cols if cols[r][1] <= t.bbox[0] + t.bbox[2]]
+                if t.bbox[0] + t.bbox[2] < cols[role][1] and left_cols:
+                    role = max(left_cols, key=lambda r: cols[r][1])
                 if PERCENT.fullmatch(t.text.strip()) and "tax" in num_cols:
                     role = "tax"
                 cells.setdefault(role, []).append(t)
@@ -364,11 +375,11 @@ def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
                 consumed.add(i)
             continue
         amt_toks = cells.get("amount", [])
-        amount_raw = amt_toks[0].text.strip("[]|") if len(amt_toks) == 1 else ""
+        amount_raw = amt_toks[0].text.strip(JUNK) if len(amt_toks) == 1 else ""
         item = {"parts": [(cy, desc)] if desc else [], "unit": _text(unit) or None, "tokens": toks, "cy": cy,
                 "no_separator": len(amount_raw) >= 5 and amount_raw.isdigit()}
         for role, ts in cells.items():
-            raw = " ".join(t.text.strip("[]|") for t in ts)
+            raw = " ".join(t.text.strip(JUNK) for t in ts)
             pm = PERCENT.search(raw)
             if role == "tax":
                 item["tax_rate"] = float(pm[1]) / 100 if pm else None
@@ -411,7 +422,7 @@ def best_money(tokens: list) -> list:
     """Drop noise AFTER a complete money value ('792,090.00 2,' -> '792,090.00'). Tokens before it
     stay: OCR splits one amount into pieces ('166 90.00', '150, 000.00')."""
     for i, t in enumerate(tokens):
-        if MONEY_CENTS.search(t.text.strip("[]|")):
+        if MONEY_CENTS.search(t.text.strip(JUNK)):
             return tokens[:i + 1]
     return tokens
 
@@ -431,19 +442,68 @@ def value_below(lines: List[Line], li: int, label: list, skip: set) -> Tuple[lis
             break
         segs = segments(lines[lj])
         under = [t for s in segs for t in s if _is_num(t) and not PERCENT.fullmatch(t.text.strip())
+                 and not t.text.strip(JUNK)[:1].isalpha()          # 'D300' is a garbled word
                  and (len(re.sub(r"\D", "", t.text)) >= 3 or MONEY_CENTS.search(t.text))
                  and x0 - 0.3 * width <= t.bbox[0] + t.bbox[2] / 2 <= x1 + 0.3 * width]
         if under:
-            return best_money(under), lj
+            cents = [t for t in under if MONEY_CENTS.search(t.text.strip(JUNK))]
+            return best_money(cents or under), lj      # '0.00' beats a garbled Sinhala word 'D300'
+
         right = [s for s in segs if _numeric_seg(s) and s[0].bbox[0] > x1
                  and len(re.sub(r"\D", "", _text(s))) >= 3
                  and not all(PERCENT.fullmatch(t.text.strip()) for t in s)]
         own_label = any(head(s)[0] and match_label(_text(head(s)[0])) and s[0].bbox[0] < x1 for s in segs)
         if right and not own_label:
-            return best_money(right[0]), lj
+            return best_money([t for t in right[0] if any(c.isalnum() for c in t.text)]), lj
         if own_label:
             break
     return [], None
+
+
+FULL_DATE = re.compile(r"^\(?\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\)?[.,;]?$|^\d{4}-\d{2}-\d{2}$")
+LONE_DATE_CAP = 0.6
+NOT_DOC_DATE = re.compile(r"valid|until|period|from|\bto\b|due|supply|expir|reading|updated|last", re.I)
+
+
+def lone_date(lines: List[Line], skip: set, order: Optional[str], cands: Dict[str, "Cand"]) -> Optional["Cand"]:
+    """Document date whose label was not read (a photo lost the word 'Date'): accepted only when the
+    page shows exactly ONE date outside the table, the due date and labelled periods."""
+    taken = {c.raw_text for c in cands.values()}
+    found = {}
+    for li, ln in enumerate(lines):
+        if li in skip or NOT_DOC_DATE.search(ln.text):
+            continue
+        for t in ln.tokens:
+            if FULL_DATE.match(t.text.strip()) and t.text not in taken:
+                d, amb, other = parse_date(t.text, order)
+                if d:
+                    found.setdefault(d, (t, li, amb, other))
+    if len(found) != 1:
+        return None
+    d, (t, li, amb, other) = next(iter(found.items()))
+    c = Cand("document_date", d, t.text, min(t.confidence, LONE_DATE_CAP), list(t.bbox), (False, True, True, 0.5, 0), li,
+             alt=other if amb else None)
+    c.notes.append("the 'Date' label was not readable; this is the only date printed on the page")
+    return c
+
+
+def text_beside(lines: List[Line], li: int, label: list, skip: set) -> list:
+    """A bilingual label ('Receipt No' over 'ලදුපත් අංකය') with its value printed to the right, level
+    with the gap BETWEEN the two label lines, so OCR puts the value on a line of its own. Returns the
+    first segment to the right of the label on the next lines, unless that line starts a new label."""
+    x1 = label[-1].bbox[0] + label[-1].bbox[2]
+    h = sorted(t.bbox[3] for t in label)[len(label) // 2]
+    for lj in range(li + 1, min(li + 1 + BELOW_LINES, len(lines))):
+        if lj in skip or lines[lj].top - lines[li].top > 4 * h:
+            break
+        segs = segments(lines[lj])
+        lead = head(segs[0])[0]
+        if segs[0][0].bbox[0] < x1 and lead and match_label(_text(lead)):
+            break                                         # the next label of the left column
+        right = [sg for sg in segs if sg[0].bbox[0] > x1 + h]
+        if right:
+            return right[0]
+    return []
 
 
 # ---------------------------------------------------------------- fields and attributes
@@ -495,7 +555,7 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
                 if not amt:
                     continue
                 amt = best_money(amt)
-                p = parse_amount(" ".join(t.text.strip("[]|") for t in amt))
+                p = parse_amount(" ".join(t.text.strip(JUNK) for t in amt))
                 if p is None:
                     continue
                 pm = PERCENT.search(ln.text)
@@ -512,17 +572,22 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
                 offer(c)
             else:
                 val = rest or (segs[nxt[0]] if nxt else [])
+                same_line = bool(val)
                 if f in TEXT_FIELDS and PII_LABEL.search(_text(label)):
                     continue        # 'Reg. Mobile No' is a phone number, not a registration number
                 if not val and f in DATE_FIELDS:
-                    val, _ = value_below(lines, li, label or seg, skip)
+                    val, lj = value_below(lines, li, label or seg, skip)
+                    if f == "document_date" and lj is not None and NOT_DOC_DATE.search(lines[lj].text):
+                        val = []    # 'දිනය' under 'Quotation Date': the date below is 'Valid Until'
+                if not val:
+                    val = text_beside(lines, li, label or seg, skip)
                 if not val:
                     continue
                 if f in DATE_FIELDS:
                     d, amb, other = parse_date(_text(val), order)
                     if d is None:
                         continue
-                    c = Cand(f, d, _text(val), _conf(val), union_bbox(val), key[:1] + (True, True) + key[1:], li,
+                    c = Cand(f, d, _text(val), _conf(val), union_bbox(val), key[:1] + (True, same_line) + key[1:], li,
                              alt=other if amb else None)
                     if amb:
                         c.notes.append(f"day and month both <= 12; read as DD/MM ({d.isoformat()}), "
@@ -547,7 +612,20 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
         # (utility bills, receipts) only the known fact names, so neighbouring labels are not paired
         in_header_block = table_start is not None and LETTERHEAD_LINES <= li < table_start
         attributes += _attributes(free, pairs_allowed=in_header_block)
+        if len(free) == 1 and len(segs) == 1 and _known_fact(_text(free[0])) and not attributes_have(attributes, free[0]):
+            val = text_beside(lines, li, free[0], skip)
+            if val:
+                attributes += _attributes([free[0], val], pairs_allowed=True)
     return best, attributes, field_lines
+
+
+def _known_fact(key: str) -> Optional[str]:
+    words = normalise(key).split()
+    return next((p for p in KNOWN_FACTS if _phrase_score(words, p) >= 0.85), None)
+
+
+def attributes_have(attributes: List[Attribute], seg: list) -> bool:
+    return any(a.key.strip(" :-|") == _text(seg).strip(" :-|") for a in attributes)
 
 
 def _header_word(text: str) -> bool:
@@ -559,17 +637,19 @@ def _header_word(text: str) -> bool:
 def _attributes(segs: List[list], pairs_allowed: bool = True) -> List[Attribute]:
     out: List[Attribute] = []
     pairs = []
-    for s in segs:
+    for n, s in enumerate(segs):
         txt = _text(s)
         if ":" in txt and not txt.strip().endswith(":") and not re.match(r"^\d", txt):
             k, v = txt.split(":", 1)
             pairs.append((k, v, s))
+        elif txt.strip().endswith(":") and n + 1 < len(segs) and _known_fact(txt.strip(" :")):
+            pairs.append((txt, _text(segs[n + 1]), segs[n + 1]))     # 'Month: | 2026 OCT' (billing month)
     if not pairs and len(segs) >= 2 and len(segs) % 2 == 0:
         for k_seg, v_seg in zip(segs[::2], segs[1::2]):
             kt = _text(k_seg)
             if any(c.isdigit() for c in kt) or len(kt.split()) > 6:
                 return out
-            known = any(_phrase_score(normalise(kt).split(), p) >= 0.85 for p in KNOWN_FACTS)
+            known = bool(_known_fact(kt))
             if pairs_allowed or known:
                 pairs.append((kt, _text(v_seg), v_seg))
     for k, v, s in pairs:
@@ -579,12 +659,31 @@ def _attributes(segs: List[list], pairs_allowed: bool = True) -> List[Attribute]
         if NUMERIC_FACT.search(k) and not re.search(r"\d", v):
             continue        # 'Charge for Units Consumed | Fixed Charge': two column headings, not a fact
         letters = sum(ch.isalpha() for ch in k)
-        if not k or not v or PII_KEY.search(k) or "\u25cf" in v or match_label(k) or match_label(v) \
+        # 'Payment | Bank Transfer': a known fact name wins over the look-alike field label 'Payments'
+        label_like = match_label(k) and not (_known_fact(k) and not re.search(r"\d", v))
+        if not k or not v or PII_KEY.search(k) or "\u25cf" in v or label_like or match_label(v) \
                 or letters < 3 or letters < 0.5 * len(k.replace(" ", "")) or (sum(ch.isalnum() for ch in v) < 2 and not v.strip().isdigit()) \
                 or _conf(s) < MIN_ATTR_CONF:
             continue
         out.append(Attribute(key=k, value=v, confidence=_conf(s), bbox=union_bbox(s)))
     return out
+
+
+LOOKALIKE = {"$": "S", "5": "S", "8": "S", "0": "O", "1": "I", "|": "I", "6": "G", "2": "Z"}
+COMPANY_WORDS = {"pvt", "ltd", "limited", "plc", "private", "co", "company", "and", "the", "of"}
+
+
+def initials_fix(number: str, issuer: str) -> Optional[str]:
+    prefix, sep, rest = re.match(r"^([^/\-_]+)([/\-_]?)(.*)$", number).groups()
+    if not sep or prefix.isalpha() or not any(c.isalpha() or c == "$" for c in prefix):
+        return None
+    words = [w for w in re.findall(r"[A-Za-z]+", issuer) if w.lower() not in COMPANY_WORDS]
+    initials = "".join(w[0] for w in words).upper()
+    if len(initials) != len(prefix):
+        return None
+    if all(c.upper() == i or LOOKALIKE.get(c) == i for c, i in zip(prefix, initials)):
+        return initials + sep + rest
+    return None
 
 
 def seller(lines: List[Line]):
@@ -597,6 +696,10 @@ def seller(lines: List[Line]):
     for ln in firsts[: max(6, len(firsts) // 3)]:
         # keep only the name words: a tilted photo can merge the (masked) address line into this one
         words = [t.text for t in ln.tokens if "\u25cf" not in t.text and not re.search(r"\d", t.text)]
+        # an English name line and its Sinhala translation below can merge word by word on a photo
+        latin = [w for w in words if not re.search("[\u0d80-\u0dff\u0b80-\u0bff]", w)]
+        if latin != words and (ISSUER_HINTS.search(" ".join(latin)) or SELLER_HINTS.search(" ".join(latin))):
+            words = latin
         name = re.sub(r"\(\s*pv\s*\)|\bpv\b\s*$|\(\s*$", "", " ".join(words), flags=re.I).strip(" -|,(")
         if (ISSUER_HINTS.search(name) or SELLER_HINTS.search(name)) and not match_label(name):
             from entity_extraction.extractor import Candidate
@@ -610,7 +713,18 @@ def date_order(tokens: Sequence) -> Optional[str]:
         return "mdy"
     if re.search(r"dd[/.-]mm[/.-]yy", text):
         return "dmy"
-    return None
+    # The hint can be unreadable ('(MM/DD/YYYY)' read as 'mmo)'). The page's own dates then decide:
+    # '10/14/2026' can only be month/day, '27/09/2026' only day/month. Mixed evidence decides nothing.
+    seen = set()
+    for t in tokens:
+        m = re.fullmatch(r"\(?(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\)?[.,;]?", t.text.strip())
+        if m:
+            a, b = int(m[1]), int(m[2])
+            if a <= 12 < b <= 31:
+                seen.add("mdy")
+            elif b <= 12 < a <= 31:
+                seen.add("dmy")
+    return seen.pop() if len(seen) == 1 else None
 
 
 # ---------------------------------------------------------------- amount in words
@@ -673,6 +787,10 @@ def extract_invoice(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
     cands, attributes, _ = find_fields(lines, consumed, order, table_start=min(consumed) if consumed else None)
     notes: Dict[str, List[str]] = {}
 
+    if "document_date" not in cands:
+        lone = lone_date(lines, consumed, order, cands)
+        if lone:
+            cands["document_date"] = lone
     issuer = seller(lines)
     if issuer:
         cands["issuer"] = Cand("issuer", issuer.value, issuer.raw_text, issuer.ocr_confidence, issuer.bbox,
@@ -719,6 +837,37 @@ def extract_invoice(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
                 c.alt = None
         checks.append({"rule": "due date = issue date + terms", "hard": False, "passed": bool(ok),
                        "explanation": f"terms {terms.value} days: " + ("consistent" if ok else "inconsistent")})
+
+    # quotation: 'Valid Until' is after the quotation date ('Prices valid for 30 days'); an ambiguous
+    # DD/MM vs MM/DD date is settled by the reading that keeps the validity period positive (own method)
+    valid = next((a for a in attributes if _known_fact(a.key) == "valid until"), None)
+    if valid and "document_date" in cands:
+        issue = cands["document_date"]
+        vd, v_amb, v_other = parse_date(valid.value, order)
+        days_m = re.search(r"valid\s+for\s+(\d{1,3})\s*days", " ".join(ln.text for ln in lines), re.I)
+        if vd:
+            options = [(i, v) for i in [issue.value, issue.alt] if i for v in [vd, v_other if v_amb else None] if v
+                       and (i == issue.value) == (v == vd)]          # both dates are printed the same way
+            ok = [(i, v) for i, v in options if (v - i).days > 0
+                  and (not days_m or abs((v - i).days - int(days_m[1])) <= 1)]
+            if ok:
+                if issue.alt and ok[0][0] != issue.value:
+                    issue.value = ok[0][0]
+                if issue.alt:
+                    issue.notes.append("date order settled: 'Valid Until' must come after the quotation date")
+                issue.alt = None
+            checks.append({"rule": "valid until after the quotation date", "hard": False, "passed": bool(ok),
+                           "explanation": (f"valid {(ok[0][1] - ok[0][0]).days} days" if ok else "no date order fits")
+                           + (f"; the page says {days_m[1]} days" if days_m else "")})
+
+    # reference prefix: 'SSS/QT/...' read as '$8S/QT/...'. The prefix is often the seller's initials
+    # (Suryabala Solar Solutions = SSS); a prefix that differs only by look-alike characters is restored.
+    if "document_number" in cands and "issuer" in cands:
+        dn = cands["document_number"]
+        fixed = initials_fix(str(dn.value), str(cands["issuer"].value))
+        if fixed:
+            dn.notes.append(f"prefix restored from the seller's initials: '{dn.value}' -> '{fixed}'")
+            dn.value = fixed
 
     in_words = amount_in_words(lines)
     if in_words and "total_amount" in cands:
