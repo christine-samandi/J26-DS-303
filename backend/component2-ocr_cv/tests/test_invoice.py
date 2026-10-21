@@ -274,3 +274,63 @@ def test_parse_date_orders():
 def test_digit_close():
     assert digit_close(1008000, 1003000) and digit_close(4150000, 150000)
     assert not digit_close(1008000, 1003500)
+
+
+# --- 6. Utility bill layouts (EDL-style): header box with values BELOW, trilingual labels -------
+EDL_LIKE = [
+    [("BIG", 60, "Electricity Distribution Lanka (Private) Limited")],
+    [(60, "Monthly Statement of Electricity Account")],
+    [(60, "Reg. Mobile No:"), (260, "077**757"), (560, "Tariff:"), (760, "Domestic")],
+    [(60, "Previous Due"), (260, "Payments"), (460, "Credits"), (660, "This Month Charge"), (900, "Total Due")],
+    [(60, "26,979.37"), (260, "27,000.00"), (460, "0.00"), (660, "19,841.03"), (900, "19,820.40")],
+    [(60, "Charge for Electricity Consumed (Rs.)")],
+    [(60, "පාවිච්චි කළ විදුලිය සඳහා අය කිරීම"), (700, "19,345.00")],
+    [(60, "S. S. C. Levy (Rs.)")],
+    [(60, "සමාජ ආරක්ෂණ දායක බද්ද"), (700, "496.03")],
+    [(60, "No. of Units Exported (kWh)"), (700, "0")],
+]
+
+
+def test_utility_bill_values_below_labels():
+    out, report, f = run(EDL_LIKE)
+    assert f["previous_balance"].value == 26979.37 and f["amount_paid"].value == 27000.0
+    assert f["total_amount"].value == 19841.03 and f["balance_due"].value == 19820.4
+    assert f["subtotal"].value == 19345.0 and f["sscl"].value == 496.03
+    assert "seller_reg_no" not in f                       # a mobile number is never a registration number
+    assert check(report, "totals_chain")["passed"] and check(report, "balance")["passed"]
+    assert {a.key: a.value for a in out.attributes}["No. of Units Exported (kWh)"] == "0"   # solar evidence
+
+
+# --- 7. Photo of a Sri Lankan solar invoice: bilingual header, lost decimal points, 5% discount -----
+def photo_invoice():
+    rows = [("Solar PV Panel 550W", "10", "4150000", "0%", "41500000"),
+            ("On-grid Inverter 5kW", "1", "268,000.00", "0%", "268,000.00"),
+            ("Installation", "1", "65,000.00", "5%", "61,750.00")]
+    return [
+        [("BIG", 60, "SURYABALA SOLAR SOLUTIONS (PVT) LTD")],
+        [("BIG", 60, "TAX INVOICE / බදු ඉන්වොයිසිය")],
+        [(60, "VAT Reg No:"), (300, "104738291-7000"), (560, "Invoice No."), (760, "SSS/INV/2026/0417")],
+        [(560, "Invoice Date"), (760, "14/08/2026")],
+        [(60, "Item"), (420, "Qty"), (520, "Rate"), (680, "Disc"), (800, "Amount")],
+        [(60, "අයිතමය"), (420, "ප්‍රමාණය"), (520, "ඒකක මිල"), (680, "වට්ටම"), (800, "මුදල")],
+    ] + [[(60, d), (420, q), (520, r), (680, dc), (800, a)] for d, q, r, dc, a in rows] + [
+        [(500, "Sub Total"), (800, "744,750.00")],
+        [(500, "VAT 18%"), (800, "134,055.00")],
+        [(500, "Total")],
+        [(800, "878,805.00")],
+        [(500, "Advance Paid"), (800, "30000000")],
+        [(500, "Balance Due"), (800, "578,805.00")],
+    ]
+
+
+def test_photo_invoice_lost_decimals_and_discount():
+    out, report, f = run(photo_invoice())
+    assert [(i.unit_price, i.amount) for i in out.line_items] == [(41500.0, 415000.0), (268000.0, 268000.0),
+                                                                 (65000.0, 61750.0)]
+    assert out.line_items[2].discount == 3250.0                       # 5% of 65,000 as an amount
+    assert out.line_items[0].needs_review                              # repaired values are confirmed by the user
+    assert f["total_amount"].value == 878805.0                         # value on the line below 'Total'
+    assert report["corrections"]["amount_paid"] == {"ocr_value": 30000000.0, "corrected_value": 300000.0}
+    assert f["document_number"].value == "SSS/INV/2026/0417" and f["document_date"].value == "2026-08-14"
+    for rule in ("items_sum", "totals_chain", "balance", "implied tax rate"):
+        assert check(report, rule)["passed"], rule

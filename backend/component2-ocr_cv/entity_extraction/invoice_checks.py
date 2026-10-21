@@ -29,9 +29,18 @@ def close(a: float, b: float) -> bool:
     return abs(a - b) <= (ROUNDING if whole and max(abs(a), abs(b)) >= 100 else CENT)
 
 
+def lost_decimal(a: float, b: float) -> bool:
+    """True when a is b with its decimal point dropped: OCR read '300,000.00' as '30000000'.
+    Sri Lankan money is printed with two decimals, so a = b x 100 exactly."""
+    return b > 0 and abs(a - round(b * 100)) < 0.5 and abs(a - round(a)) < 1e-9
+
+
 def digit_close(a: float, b: float) -> bool:
-    """True when b differs from a by ONE digit (wrong, extra or missing digit) - the typical OCR
-    error - so a repair never invents a value that the page does not almost show."""
+    """True when b differs from a by ONE digit (wrong, extra or missing digit) or only by a lost
+    decimal point - the typical OCR errors - so a repair never invents a value that the page does
+    not almost show."""
+    if lost_decimal(a, b):
+        return True
     sa, sb = f"{abs(a):.2f}".replace(".", ""), f"{abs(b):.2f}".replace(".", "")
     if len(sa) == len(sb):
         return sum(x != y for x, y in zip(sa, sb)) == 1
@@ -79,6 +88,9 @@ class ItemResult:
     passed: Optional[bool]       # None: the row has no quantity/rate to check
     includes_tax: Optional[bool]
     explanation: str
+    unit_price: Optional[float] = None    # values after a lost-decimal repair (else as read)
+    amount: Optional[float] = None
+    repaired: bool = False
 
 
 @dataclass
@@ -91,20 +103,37 @@ class InvoiceChecks:
     contradicted: Set[str]
 
 
+def _check_once(qty, rate, amount, discount, tax_rate) -> Optional[Tuple[bool, str]]:
+    base = qty * rate
+    bases = [(base, "")]
+    if discount:
+        bases += [(base - discount, f" - {money(discount)}"), (base * (1 - discount / 100), f" - {discount:g}%")]
+    for b, d in bases:
+        if close(b, amount):
+            return False, f"{qty:g} x {money(rate)}{d} = {money(amount)}"
+        if tax_rate and close(b * (1 + tax_rate), amount):
+            return True, f"{qty:g} x {money(rate)}{d} + {tax_rate:.0%} tax = {money(amount)}"
+    return None
+
+
 def check_item(qty: Optional[float], rate: Optional[float], amount: Optional[float],
                discount: Optional[float], tax_rate: Optional[float]) -> ItemResult:
+    """qty x rate (- discount) (+ tax) = amount. If it fails, the row is tried again with the
+    decimal point restored in the rate and/or amount ('4150000' -> 41,500.00): OCR often drops the
+    point on photos, and two printed numbers agreeing after the same repair is strong evidence."""
     if qty is None or rate is None or amount is None:
-        return ItemResult(None, None, "quantity, rate or amount missing; not checkable")
-    base = qty * rate
-    bases = [base]
-    if discount:
-        bases += [base - discount, base * (1 - discount / 100)]
-    for b in bases:
-        if close(b, amount):
-            return ItemResult(True, False, f"{qty:g} x {money(rate)} = {money(amount)}")
-        if tax_rate and close(b * (1 + tax_rate), amount):
-            return ItemResult(True, True, f"{qty:g} x {money(rate)} + {tax_rate:.0%} tax = {money(amount)}")
-    return ItemResult(False, None, f"{qty:g} x {money(rate)} = {money(base)}, but the row says {money(amount)}")
+        return ItemResult(None, None, "quantity, rate or amount missing; not checkable", rate, amount)
+    hit = _check_once(qty, rate, amount, discount, tax_rate)
+    if hit:
+        return ItemResult(True, hit[0], hit[1], rate, amount)
+    for r, a in ((rate / 100, amount / 100), (rate, amount / 100), (rate / 100, amount)):
+        if (r != rate and abs(rate - round(rate)) > 1e-9) or (a != amount and abs(amount - round(amount)) > 1e-9):
+            continue                      # only a number printed WITHOUT decimals can have lost its point
+        hit = _check_once(qty, r, a, discount, tax_rate)
+        if hit:
+            return ItemResult(True, hit[0], hit[1] + " (decimal point restored)", round(r, 2), round(a, 2), True)
+    return ItemResult(False, None, f"{qty:g} x {money(rate)} = {money(qty * rate)}, but the row says {money(amount)}",
+                      rate, amount)
 
 
 def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str, float]) -> InvoiceChecks:
@@ -121,8 +150,28 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
         if r.passed is not None:
             checks.append(Check(f"line {n}: quantity x rate = amount", False, r.passed, r.explanation))
 
+    # Lost decimal points across the table: q x r = a also holds with r/100 and a/100, so a row
+    # alone cannot tell '4150000' from 41,500.00. The lines must add up to the printed subtotal (or
+    # total): if they only do after restoring the point in rows printed WITHOUT separators, restore it.
+    target_value = v.get("subtotal", v.get("total_amount"))
+    suspects = [k for k, (i, r) in enumerate(zip(items, item_results))
+                if i.get("no_separator") and r.amount is not None and r.amount >= 100 and not r.repaired]
+    if suspects and target_value is not None:
+        total = sum(r.amount for r in item_results if r.amount is not None)
+        fixed = total - sum(item_results[k].amount for k in suspects) * 0.99
+        if not close(total, target_value) and close(fixed, target_value):
+            for k in suspects:
+                r = item_results[k]
+                r.amount = round(r.amount / 100, 2)
+                r.unit_price = round(r.unit_price / 100, 2) if r.unit_price is not None and \
+                    abs(r.unit_price - round(r.unit_price)) < 1e-9 and r.unit_price >= 100 else r.unit_price
+                r.repaired = True
+                q = items[k].get("quantity")
+                r.explanation = ((f"{q:g} x {money(r.unit_price)} = " if q is not None and r.unit_price is not None else "")
+                                 + f"{money(r.amount)} (decimal point restored: the lines then add up to the subtotal)")
+
     eqs: List[Equation] = []
-    amounts = [i["amount"] for i in items if i.get("amount") is not None]
+    amounts = [r.amount for r in item_results if r.amount is not None]
     inclusive = sum(1 for r in item_results if r.includes_tax) > sum(1 for r in item_results if r.includes_tax is False)
     if len(amounts) >= 2 or (len(amounts) == 1 and len(items) == 1):
         target = "total_amount" if inclusive else ("subtotal" if "subtotal" in v else "total_amount")
@@ -132,8 +181,8 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
             eqs.append(Equation("items_sum", [(target, 1.0)], -sum(amounts),
                                 f"sum of {len(amounts)} line amounts = {target.replace('_', ' ')}"))
         if inclusive and "subtotal" in v:
-            pre = [i["quantity"] * i["unit_price"] for i in items
-                   if i.get("quantity") is not None and i.get("unit_price") is not None]
+            pre = [i["quantity"] * r.unit_price for i, r in zip(items, item_results)
+                   if i.get("quantity") is not None and r.unit_price is not None]
             if len(pre) == len(amounts):
                 eqs.append(Equation("items_sum_before_tax", [("subtotal", 1.0)], -sum(pre),
                                     "sum of quantity x rate (before tax) = subtotal"))
@@ -185,7 +234,6 @@ def run_checks(values: Dict[str, float], items: Sequence[dict], taxes: Dict[str,
     for eq in eqs:
         ok = eq.holds(v)
         fields = [f for f, _ in eq.terms]
-        lhs = " + ".join(f"{'-' if c < 0 else ''}{f.replace('tax:', '')} {money(v[f])}" for f, c in eq.terms)
         fixed = [f for f in fields if f in corrections]
         note = f" (after correcting {', '.join(fixed)})" if fixed else ""
         checks.append(Check(eq.rule, True, ok, f"{eq.text}{note}: " + ("holds" if ok else
