@@ -1,5 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
+from threading import Lock
+
+from human_review.storage import build_review_repository
 
 from fastapi import FastAPI, HTTPException
 from pydantic import (
@@ -479,8 +482,25 @@ class ReviewCaseResponse(BaseModel):
     feedback: ReviewFeedbackResponse | None
 
 
-# Prototype repository. Cases are stored in memory.
-review_repository = ReviewCaseRepository()
+
+# Created on first use, so tests can inject a test repository.
+review_repository = None
+
+_repository_lock = Lock()
+
+
+def get_review_repository():
+    """Return the configured review repository."""
+
+    global review_repository
+
+    if review_repository is None:
+        with _repository_lock:
+            if review_repository is None:
+                review_repository = build_review_repository()
+
+    return review_repository
+
 
 
 def review_case_response(case: ReviewCase) -> ReviewCaseResponse:
@@ -574,7 +594,7 @@ def create_human_review_case(request: CreateReviewCaseRequest):
         request_id=request.request_id,
     )
 
-    review_repository.add_case(case)
+    get_review_repository().add_case(case)
 
     return review_case_response(case)
 
@@ -586,7 +606,7 @@ def create_human_review_case(request: CreateReviewCaseRequest):
 def list_human_review_cases(
     status: ReviewCaseStatus | None = None,
 ):
-    cases = review_repository.list_cases(status=status)
+    cases = get_review_repository().list_cases(status=status)
     return [review_case_response(case) for case in cases]
 
 
@@ -596,7 +616,7 @@ def list_human_review_cases(
 )
 def get_human_review_case(case_id: str):
     try:
-        case = review_repository.get_case(case_id)
+        case = get_review_repository().get_case(case_id)
     except ReviewCaseNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -612,7 +632,7 @@ def get_human_review_case(case_id: str):
 )
 def start_human_review(case_id: str):
     try:
-        case = review_repository.start_review(case_id)
+        case = get_review_repository().start_review(case_id)
     except ReviewCaseNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -636,7 +656,7 @@ def complete_human_review(
     request: CompleteReviewRequest,
 ):
     try:
-        case = review_repository.complete_review(
+        case = get_review_repository().complete_review(
             case_id=case_id,
             reviewer_id=request.reviewer_id,
             decision=request.decision,
