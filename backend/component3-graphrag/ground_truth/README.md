@@ -47,6 +47,12 @@ including the first and last day of each) and 6 questions the system must refuse
 version is looked up from the version tables above by date, so the questions never state an
 answer. This is the **development set** (used while building retrieval).
 
+`stress_questions.csv`: 12 plain-language questions and 4 to refuse, worded the way a user
+would ask ("How much can I earn without paying any tax?", "My father is 65 and earns FD
+interest"). It found four failures (missing everyday words, "I work for a US company" read
+as a question about companies, a relief returned for "tax on lottery winnings"), which were
+fixed; it is therefore also development data now, not an unbiased score.
+
 For an unbiased score, a **held-out set** in the same format
 (`retrieval_questions_heldout.csv`) is written by people who have not seen the system and is
 run once, without changing the code afterwards.

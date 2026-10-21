@@ -1,0 +1,17 @@
+qid,question,as_of_date,expected_rule_key,why
+S01,How much can I earn without paying any tax this year?,2026-10-01,personal_relief,tax-free threshold in plain words
+S02,"I put solar panels on my roof last year, can that reduce my tax?",2025-06-01,solar_panel_relief,solar in plain words
+S03,"My salary is 250,000 a month, what percentage of tax do I pay?",2025-06-01,individual_income_tax_slabs,rates in plain words
+S04,What was the tax-free amount for a person in 2021?,2021-06-01,personal_relief,old year
+S05,"I rent out my annex, is there any allowance for repairs?",2024-06-01,rental_relief,rent in plain words
+S06,My father is 65 and earns FD interest. Was there a relief for him in 2019?,2019-06-01,senior_citizen_interest_relief,senior described without the word senior
+S07,Can I claim my kids' school fees against my tax in 2021?,2021-06-01,qualifying_expenditure_relief,education expense
+S08,I work freelance for a US company and get paid in dollars. Any relief in 2019?,2019-06-01,foreign_currency_service_relief,foreign income in plain words
+S09,What are the income tax brackets for 2024?,2024-06-01,individual_income_tax_slabs,brackets
+S10,How much personal allowance did people get in 2018?,2018-10-01,personal_relief,earliest version
+S11,What is the highest tax rate for individuals in 2023?,2023-06-01,individual_income_tax_slabs,top band
+S12,Medical insurance premium deduction in 2020,2020-06-01,qualifying_expenditure_relief,first year of 2(f)
+S13,Can I still claim my kids' school fees against tax now?,2026-10-01,none,2(f) ended 2022: must not answer
+S14,Is there tax relief for my housing loan interest in 2025?,2025-06-01,none,2(f) ended 2022: must not answer
+S15,What is the tax on lottery winnings?,2025-06-01,none,not modelled
+S16,How do I pay my water bill?,2025-06-01,none,unrelated
