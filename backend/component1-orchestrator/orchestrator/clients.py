@@ -253,7 +253,7 @@ class HttpOcrClient:
         except json.JSONDecodeError as e:
             raise ComponentUnavailable(f"C2 did not answer with JSON: {e}") from e
         self.notes = []
-        if out.get("schema_version") != "0.1" or not isinstance(out.get("extracted_fields"), list):
+        if out.get("schema_version") not in ("0.1", "0.2") or not isinstance(out.get("extracted_fields"), list):
             raise ComponentUnavailable("C2's answer is not ocr_output v0.1")
         document_type = out.get("document_type")
         if not isinstance(document_type, str):
