@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 
@@ -97,11 +98,23 @@ class Deps:
 Update = dict  # the state keys a stage sets
 
 
+def doc_id(n: int) -> str:
+    """The neutral id of the n-th uploaded document (1-based). File names never get past
+    extract: findings, the trace sent to C4 and every message use these ids; only the UI
+    maps them back to what the user uploaded."""
+    return f"doc-{n}"
+
+
 def extract(state: PipelineState, deps: Deps) -> Update:
     request = state["request"]
     try:
         return {
-            "ocr_results": tuple(deps.ocr.extract(request.request_id, d) for d in request.documents)
+            "ocr_results": tuple(
+                deps.ocr.extract(request.request_id, ref).model_copy(
+                    update={"document_id": doc_id(n)}
+                )
+                for n, ref in enumerate(request.documents, start=1)
+            )
         }
     except ComponentUnavailable as e:
         raise StageError(str(e)) from e
@@ -116,14 +129,15 @@ def normalise(state: PipelineState, deps: Deps) -> Update:
     """
     request = state["request"]
     documents, payslips, candidates = [], [], []
-    for ref, doc in zip(request.documents, state.get("ocr_results", ()), strict=True):
+    for doc in state.get("ocr_results", ()):
+        ref = doc.document_id
         if doc.document_type.startswith("payslip"):
             payslips.append(doc)
             documents.append(
                 DocumentSummary(document_id=ref, document_type=doc.document_type, role="payslip")
             )
         elif doc.document_type in RELIEF_DOCUMENTS:
-            candidates.append((ref, doc))
+            candidates.append(doc)
             documents.append(
                 DocumentSummary(
                     document_id=ref,
@@ -216,6 +230,10 @@ def discover_reliefs(state: PipelineState, deps: Deps) -> Update:
     reliefs C3 returns are assessed the same way (orchestrator.reliefs). Nothing is assumed:
     a missing answer, amount or date leaves the relief out and asks for review. One
     document backs at most one relief, and a cap counts once per YA across documents.
+
+    C3 is asked with include_history, so a payment that names a relief which has ended
+    (e.g. the expenditure relief, last valid 2022-12-31) is reported as withdrawn, with
+    C3's citation, rather than as "no relief". Neither is applied, and neither needs review.
     """
     request = state["request"]
     ya = request.year_of_assessment
@@ -233,7 +251,8 @@ def discover_reliefs(state: PipelineState, deps: Deps) -> Update:
     findings: list[ReliefFinding] = []
     claims: dict[str, list[ReliefClaim]] = {}
     retrievals = []
-    for ref, doc in state["relief_candidates"]:
+    for doc in state["relief_candidates"]:
+        ref = doc.document_id
         user = inputs.get(ref, DocumentInput(document=ref))
         kind = doc.document_type
         query = relief_query(doc.issuer, user.payment_for)
@@ -259,6 +278,7 @@ def discover_reliefs(state: PipelineState, deps: Deps) -> Update:
                     as_of_date=ya_start,
                     taxpayer_category="resident_individual",
                     rule_types=["relief"],
+                    include_history=True,
                 )
             )
         except ComponentUnavailable as e:
@@ -274,21 +294,40 @@ def discover_reliefs(state: PipelineState, deps: Deps) -> Update:
         if output.request_id != request.request_id:
             raise StageError(f"C3 answered request {output.request_id}, not {request.request_id}")
         retrievals.append(output)
-        found = [
-            r
-            for r in output.results
-            if r.rule_type == "relief"
-            and r.rule_key != RELIEF_KEY
-            and r.validity.in_force_on_as_of_date
+        reliefs = [
+            r for r in output.results if r.rule_type == "relief" and r.rule_key != RELIEF_KEY
         ]
+        found = [r for r in reliefs if r.validity.in_force_on_as_of_date]
         if not found:
-            if user.payment_for:
+            ended = _withdrawn(reliefs, ya_start)
+            if ended:
+                findings += [
+                    ReliefFinding(
+                        document_id=ref,
+                        status="withdrawn",
+                        query=query,
+                        rule_id=r.rule_id,
+                        rule_key=r.rule_key,
+                        title=r.title,
+                        citation=r.source.citation,
+                        rule_text=r.text,
+                        amount_paid=user.amount_paid,
+                        retrieval_confidence=Decimal(str(r.confidence.score)),
+                        valid_to=r.validity.valid_to,
+                        reasons=(
+                            f"this relief was withdrawn, last valid to {r.validity.valid_to}: "
+                            f"no relief available for this payment in YA {ya}",
+                        ),
+                    )
+                    for r in ended
+                ]
+            elif user.payment_for:
                 findings.append(
                     ReliefFinding(
                         document_id=ref,
                         status="no_relief",
                         query=query,
-                        reasons=("C3 found no relief for this payment",),
+                        reasons=(f"no relief available for this payment in YA {ya}",),
                     )
                 )
             else:
@@ -390,6 +429,18 @@ def discover_reliefs(state: PipelineState, deps: Deps) -> Update:
     }
 
 
+def _withdrawn(reliefs: list, ya_start: date) -> list:
+    """C3's reliefs that ended before the YA began, latest version per relief: what to
+    report when none is in force. Versions that start after the YA are not "withdrawn"."""
+    latest = {}
+    for r in reliefs:
+        to = r.validity.valid_to
+        if to is not None and to < ya_start:
+            if r.rule_key not in latest or to > latest[r.rule_key].validity.valid_to:
+                latest[r.rule_key] = r
+    return list(latest.values())
+
+
 def _with_combined(finding: ReliefFinding, combined: dict[str, ReliefClaim]) -> ReliefFinding:
     """An applied relief claimed on several documents: show the combined remaining amount."""
     claim = combined.get(finding.rule_key or "")
@@ -485,6 +536,7 @@ def assure(state: PipelineState, deps: Deps) -> Update:
         rules=state["rules"],
         retrieval_rule_ids=tuple(r.rule_id for r in state["retrieval"].results),
         calc_steps=state["calc"].steps,
+        reliefs=state.get("relief_claims", ()),
         claims=state["explanation"].claims,
         explanation=state["explanation"],
         llm_calls=state.get("llm_calls", ()),
@@ -594,6 +646,7 @@ def deliver(state: PipelineState, deps: Deps) -> Update:
             stages_run=(*state.get("stages_run", ()), "deliver"),
             documents=state.get("documents", ()),
             relief_findings=state.get("relief_findings", ()),
+            reliefs=() if status == "failed" else state.get("relief_claims", ()),
             pii_redacted=state.get("pii_redacted", 0),
             assurance=assurance,
             assurance_note=note,

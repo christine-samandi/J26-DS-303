@@ -216,6 +216,124 @@
           }
         ]
       }
+    },
+    {
+      "rank": 3,
+      "rule_id": "RULE-EXPENDITURE_RELIEF-V1",
+      "rule_key": "qualifying_expenditure_relief",
+      "rule_type": "relief",
+      "title": "Expenditure relief (health, education, housing loan interest, pension, shares)",
+      "text": "Expenditure relief (health, education, housing loan interest, pension, shares): up to Rs. 1,200,000 for each year of assessment, and not more than the total of the qualifying expenditure: health expenditure and medical insurance; local education for the individual or their children; housing loan interest; contributions to a local pension scheme; listed shares, treasury bonds or bills. Who can claim: a resident individual.",
+      "values": {
+        "cap": {
+          "amount": 1200000,
+          "currency": "LKR",
+          "period": "year_of_assessment"
+        }
+      },
+      "applies_to": {
+        "income_types": [
+          "employment",
+          "business",
+          "investment",
+          "other"
+        ],
+        "taxpayer_categories": [
+          "resident_individual"
+        ]
+      },
+      "source": {
+        "document_id": "DOC-IRA-AMEND-10-2021",
+        "document_title": "Inland Revenue (Amendment) Act, No. 10 of 2021",
+        "document_type": "amendment_act",
+        "act_number": "10 of 2021",
+        "section": "55",
+        "subsection": "2",
+        "paragraph": null,
+        "schedule": null,
+        "page": 55,
+        "citation": "Inland Revenue (Amendment) Act, No. 10 of 2021, s.55(2) (amending Fifth Schedule, paragraph 2(f) of Act No. 24 of 2017), pp.55-59",
+        "published_date": "2021-05-13",
+        "url": "https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No._10_2021_E.pdf"
+      },
+      "validity": {
+        "valid_from": "2020-01-01",
+        "valid_to": "2022-12-31",
+        "status": "outdated",
+        "in_force_on_as_of_date": false,
+        "superseded_by": null,
+        "supersedes": null,
+        "changed_by_document_id": "DOC-IRA-AMEND-10-2021"
+      },
+      "confidence": {
+        "score": 0.474,
+        "level": "low",
+        "components": {
+          "semantic_similarity": 0.269,
+          "graph_match": 1.0,
+          "extraction_confidence": 0.864,
+          "temporal_match": 0.0
+        }
+      },
+      "evidence": {
+        "chunk_ids": [
+          "CHUNK-IRA-AMEND-10-2021-S055-2-P1",
+          "CHUNK-IRA-AMEND-45-2022-S036-2"
+        ],
+        "matched_text": "(f) in the case of a resident individual, following expenditure up to a total sum of Rs. 1,200,000, incurred for a year of assessment on or after January 1, 2020: - (i) health expenditure including contributions to medical insurance; (ii) vocational education or other educational expenditure incurred locally by such individual or on behalf of such individual’s children; (iii) interest paid on housing loans; (iv) contributions made to any local pension scheme, other than for a scheme under the employer or on behalf of the employer, by an employee; (v) expenditure incurred for the purchase of shares or any other financial instrument listed in the Colombo Stock Exchange and licensed by the Securities and Exchange Commission of Sri Lanka or treasury bonds under the Registered Stocks and Securities Ordinance (Chapter 420) or treasury bills under the Local Treasury Bills Ordinance (Chapter 417);",
+        "graph_path": [
+          {
+            "from": "RULE-EXPENDITURE_RELIEF-V1",
+            "relation": "DEFINED_IN",
+            "to": "CHUNK-IRA-AMEND-10-2021-S055-2-P1"
+          },
+          {
+            "from": "CHUNK-IRA-AMEND-10-2021-S055-2-P1",
+            "relation": "PART_OF",
+            "to": "DOC-IRA-AMEND-10-2021"
+          },
+          {
+            "from": "CHUNK-IRA-AMEND-10-2021-S055-2-P1",
+            "relation": "AMENDS",
+            "to": "SEG-IRA-2017-SCH5-P002"
+          },
+          {
+            "from": "RULE-EXPENDITURE_RELIEF-V1",
+            "relation": "APPLIES_TO",
+            "to": "resident_individual"
+          }
+        ],
+        "matched_entities": [
+          {
+            "text": "resident individual",
+            "label": "TAXPAYER_CATEGORY"
+          },
+          {
+            "text": "Rs. 1,200,000",
+            "label": "AMOUNT"
+          },
+          {
+            "text": "January 1, 2020",
+            "label": "DATE"
+          },
+          {
+            "text": "individual",
+            "label": "TAXPAYER_CATEGORY"
+          },
+          {
+            "text": "individual",
+            "label": "TAXPAYER_CATEGORY"
+          },
+          {
+            "text": "Chapter 420",
+            "label": "SECTION_REF"
+          },
+          {
+            "text": "Chapter 417",
+            "label": "SECTION_REF"
+          }
+        ]
+      }
     }
   ],
   "warnings": [],

@@ -34,7 +34,7 @@ YES = {"resident": "yes", "on_premises": "yes", "national_grid": "yes"}
 SNAPSHOT = Path(__file__).resolve().parent / "data/no_extra_documents_snapshot.json"
 
 
-def confirmed(document=INVOICE, amount="800000.00", day=date(2025, 8, 15), answers=YES, **kw):
+def confirmed(document="doc-1", amount="800000.00", day=date(2025, 8, 15), answers=YES, **kw):
     return DocumentInput(
         document=document,
         amount_paid=None if amount is None else D(amount),
@@ -69,7 +69,7 @@ def step(result, step_id):
     return match
 
 
-def finding(result, document=INVOICE):
+def finding(result, document="doc-1"):
     (match,) = [f for f in result.relief_findings if f.document_id == document]
     return match
 
@@ -164,8 +164,7 @@ def test_grid_answer_missing_needs_review_and_relief_is_not_applied():
     assert f.status == "needs_review"
     assert f.reasons == ("answer: Are the solar panels connected to the national grid?",)
     assert result.review_reasons == (
-        "Solar panel relief (solar_invoice_2025): answer: Are the solar panels connected to "
-        "the national grid?",
+        "Solar panel relief (doc-1): answer: Are the solar panels connected to the national grid?",
     )
     assert [q.answer for q in f.questions] == ["yes", "yes", None]
 
@@ -238,8 +237,8 @@ def test_bank_statement_is_listed_and_ignored():
     assert result.status == "delivered"
     assert result.calc.total_tax == D(96000)  # from the payslip
     assert [(x.document_id, x.role) for x in result.documents] == [
-        ("payslip_clean", "payslip"),
-        ("bank_statement_2025", "not_analysed"),
+        ("doc-1", "payslip"),
+        ("doc-2", "not_analysed"),
     ]
     assert result.documents[1].note == (
         "not analysed yet: C1 does not use bank_statement documents"
@@ -250,7 +249,7 @@ def test_bank_statement_is_listed_and_ignored():
 
 def test_payslip_bank_statement_and_invoice_together():
     docs = ("payslip_clean", "bank_statement_2025", INVOICE)
-    result = run(request(documents=docs, income=None), deps())
+    result = run(request(documents=docs, inputs=(confirmed("doc-3"),), income=None), deps())
     assert [x.role for x in result.documents] == ["payslip", "not_analysed", "relief_candidate"]
     assert result.calc.total_tax == D(36000)
     assert result.calc.refund == D(14000)  # APIT 50,000 from the payslip
@@ -268,7 +267,7 @@ def test_unreadable_issuer_asks_what_the_payment_was_for():
     docs = ("receipt_unreadable_issuer",)
     result = run(request(documents=docs, inputs=()), deps())
     assert result.status == "needs_review"
-    f = finding(result, "receipt_unreadable_issuer")
+    f = finding(result)
     assert f.status == "needs_review"
     assert f.reasons == (
         "the issuer of this receipt could not be read: say what the payment was for",
@@ -279,13 +278,13 @@ def test_users_answer_finds_the_relief_when_the_issuer_is_unclear():
     docs = ("receipt_unreadable_issuer",)
     inputs = (
         confirmed(
-            "receipt_unreadable_issuer",
+            "doc-1",
             amount="12500.00",
             payment_for="rooftop solar panel installation",
         ),
     )
     result = run(request(documents=docs, inputs=inputs), deps())
-    f = finding(result, "receipt_unreadable_issuer")
+    f = finding(result)
     assert (f.status, f.query) == ("applied", "rooftop solar panel installation")
     assert step(result, "S1_SOLAR_PANEL_RELIEF").result == D("12500.00")
 
@@ -293,25 +292,25 @@ def test_users_answer_finds_the_relief_when_the_issuer_is_unclear():
 def test_issuer_with_no_relief_asks_what_it_was_for(tmp_path):
     d = ocr_dir(tmp_path, grocery=invoice("Keells Super (Pvt) Ltd", kind="receipt"))
     result = run(request(documents=("grocery",), inputs=()), deps(d))
-    f = finding(result, "grocery")
+    f = finding(result)
     assert f.status == "needs_review"
     assert f.reasons == ("C3 found no relief for the issuer: say what the payment was for",)
 
 
 def test_payment_with_no_relief_is_simply_listed(tmp_path):
     d = ocr_dir(tmp_path, grocery=invoice("Keells Super (Pvt) Ltd", kind="receipt"))
-    inputs = (confirmed("grocery", payment_for="weekly groceries"),)
+    inputs = (confirmed("doc-1", payment_for="weekly groceries"),)
     result = run(request(documents=("grocery",), inputs=inputs), deps(d))
     assert result.status == "delivered"
-    assert finding(result, "grocery").status == "no_relief"
+    assert finding(result).status == "no_relief"
     assert result.calc.total_tax == D(96000)
 
 
 def test_relief_on_an_income_c1_does_not_calculate_is_found_but_not_applied(tmp_path):
     d = ocr_dir(tmp_path, lease=invoice("Lanka Property Agents", kind="receipt"))
-    inputs = (confirmed("lease", payment_for="house rent received"),)
+    inputs = (confirmed("doc-1", payment_for="house rent received"),)
     result = run(request(documents=("lease",), inputs=inputs), deps(d))
-    f = finding(result, "lease")
+    f = finding(result)
     assert (f.rule_key, f.status) == ("rental_relief", "not_supported")
     assert f.reasons == ("needs investment income, which C1 does not calculate yet",)
     assert result.status == "delivered"
@@ -320,7 +319,7 @@ def test_relief_on_an_income_c1_does_not_calculate_is_found_but_not_applied(tmp_
 
 def test_one_payment_matching_two_reliefs_needs_review(tmp_path):
     d = ocr_dir(tmp_path, mixed=invoice("Sunshine Solar Energy (Pvt) Ltd"))
-    inputs = (confirmed("mixed", payment_for="solar panels and house rent"),)
+    inputs = (confirmed("doc-1", payment_for="solar panels and house rent"),)
     result = run(request(documents=("mixed",), inputs=inputs), deps(d))
     by_key = {f.rule_key: f for f in result.relief_findings}
     assert by_key["rental_relief"].status == "not_supported"
@@ -330,7 +329,7 @@ def test_one_payment_matching_two_reliefs_needs_review(tmp_path):
 
 def test_two_invoices_for_the_same_relief_share_one_yearly_cap(tmp_path):
     d = ocr_dir(tmp_path, solar_a=invoice(), solar_b=invoice())
-    inputs = (confirmed("solar_a", amount="400000.00"), confirmed("solar_b", amount="400000.00"))
+    inputs = (confirmed("doc-1", amount="400000.00"), confirmed("doc-2", amount="400000.00"))
     result = run(request(documents=("solar_a", "solar_b"), inputs=inputs), deps(d))
     s = step(result, "S1_SOLAR_PANEL_RELIEF")
     assert s.inputs == {"cap": D(600000), "amount_paid": D(800000)}
@@ -338,6 +337,129 @@ def test_two_invoices_for_the_same_relief_share_one_yearly_cap(tmp_path):
     assert result.calc.total_tax == D(36000)
     assert [f.remaining_claimable for f in result.relief_findings] == [D(200000), D(200000)]
     assert "combined with 1 other document" in result.relief_findings[0].reasons[0]
+
+
+# --- no relief / withdrawn relief ----------------------------------------------------------
+
+MEDICAL = "medical_receipt_2025"
+WITHDRAWN = (
+    "this relief was withdrawn, last valid to 2022-12-31: "
+    "no relief available for this payment in YA 2025/26"
+)
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [(), (confirmed(amount="45000.00", day=date(2025, 9, 10), answers={}),)],
+    ids=["no user input", "amount and date confirmed"],
+)
+def test_medical_receipt_names_a_withdrawn_relief_which_is_reported_not_applied(inputs):
+    result = run(request(documents=(MEDICAL,), inputs=inputs), deps())
+    assert result.status == "delivered" and result.review_reasons == ()
+    f = finding(result)
+    assert f.status == "withdrawn"
+    assert (f.rule_id, f.valid_to) == ("RULE-EXPENDITURE_RELIEF-V1", date(2022, 12, 31))
+    assert "Act, No. 10 of 2021, s.55(2)" in f.citation  # C3's citation, as is
+    assert "paragraph 2(f)" in f.citation
+    assert f.reasons == (WITHDRAWN,)
+    assert f.remaining_claimable is None and f.questions == ()
+    assert result.calc.total_tax == D(96000)  # not applied
+    assert not [
+        s for s in result.calc.steps if s.step_id.startswith("S1_") and s.step_id != "S1_RELIEF"
+    ]
+
+
+def test_withdrawn_relief_is_reported_for_ya_2024_25_too():
+    inputs = (confirmed(amount="45000.00", day=date(2024, 9, 10), answers={}),)
+    result = run(request(documents=(MEDICAL,), inputs=inputs, ya="2024/25"), deps())
+    assert finding(result).status == "withdrawn"
+    assert finding(result).reasons == (
+        "this relief was withdrawn, last valid to 2022-12-31: "
+        "no relief available for this payment in YA 2024/25",
+    )
+
+
+def test_withdrawn_relief_is_not_sent_to_c4_or_explained():
+    d = deps()
+    result = run(request(documents=(MEDICAL,), inputs=()), d)
+    (trace,) = d.assurance.traces
+    assert trace.reliefs == ()
+    assert "EXPENDITURE" not in json.dumps([c.model_dump(mode="json") for c in trace.claims])
+    assert not any("xpenditure" in line for line in result.explanation.lines)
+
+
+def test_relief_queries_ask_c3_with_history_and_the_main_query_does_not():
+    d = deps()
+    run(request(documents=(MEDICAL,), inputs=()), d)
+    main, relief = d.retrieval.requests
+    assert (main.include_history, relief.include_history) == (False, True)
+    assert relief.query_text == "Green Valley Medical Centre"
+
+
+def test_a_payment_with_no_relief_in_force_or_withdrawn_says_so_for_the_ya(tmp_path):
+    d = ocr_dir(tmp_path, grocery=invoice("Keells Super (Pvt) Ltd", kind="receipt"))
+    inputs = (confirmed(payment_for="weekly groceries"),)
+    result = run(request(documents=("grocery",), inputs=inputs), deps(d))
+    f = finding(result)
+    assert (f.status, f.reasons) == (
+        "no_relief",
+        ("no relief available for this payment in YA 2025/26",),
+    )
+    assert result.status == "delivered"
+
+
+def test_a_relief_in_force_wins_over_a_withdrawn_one_on_the_same_payment(tmp_path):
+    d = ocr_dir(tmp_path, mixed=invoice("Sunshine Solar Energy (Pvt) Ltd"))
+    inputs = (confirmed(payment_for="solar panels and medical expenses"),)
+    result = run(request(documents=("mixed",), inputs=inputs), deps(d))
+    assert [(f.rule_key, f.status) for f in result.relief_findings] == [
+        ("solar_panel_relief", "applied")
+    ]
+
+
+def test_solar_and_medical_receipt_together_apply_solar_and_report_the_withdrawn_one():
+    inputs = (confirmed(), confirmed("doc-2", amount="45000.00", day=date(2025, 9, 10)))
+    result = run(request(documents=(INVOICE, MEDICAL), inputs=inputs), deps())
+    assert [(f.document_id, f.status) for f in result.relief_findings] == [
+        ("doc-1", "applied"),
+        ("doc-2", "withdrawn"),
+    ]
+    assert result.status == "delivered"
+    assert result.calc.total_tax == D(36000)
+
+
+@pytest.mark.parametrize("history, keys, warnings", [
+    (False, [], ["NO_RULE_IN_FORCE_ON_DATE"]),
+    (True, ["qualifying_expenditure_relief"], ["NO_RULE_IN_FORCE_ON_DATE"]),
+])  # fmt: skip
+def test_mock_c3_returns_a_withdrawn_relief_only_with_history(history, keys, warnings):
+    from j26_contracts.retrieval import RetrievalRequest
+
+    out = MockRetrievalClient().retrieve(
+        RetrievalRequest(
+            schema_version="1.0.0",
+            request_id="req-0001",
+            query_text="medical expenses",
+            as_of_date=date(2025, 4, 1),
+            rule_types=["relief"],
+            include_history=history,
+        )
+    )
+    assert [r.rule_key for r in out.results] == keys
+    assert not any(r.validity.in_force_on_as_of_date for r in out.results)
+    assert out.warnings == warnings and out.query.include_history is history
+
+
+def test_no_file_name_reaches_findings_messages_or_the_c4_trace():
+    d = deps()
+    docs = ("payslip_clean", INVOICE, MEDICAL)
+    inputs = (confirmed("doc-2", answers={}), confirmed("doc-3"))
+    result = run(request(documents=docs, inputs=inputs, income=None), d)
+    dumped = result.model_dump_json() + "".join(t.model_dump_json() for t in d.assurance.traces)
+    for name in docs:
+        assert name not in dumped
+    assert [x.document_id for x in result.documents] == ["doc-1", "doc-2", "doc-3"]
+    assert any(r.startswith("Solar panel relief (doc-2): ") for r in result.review_reasons)
 
 
 # --- PII, C3 outages, conflicts, other years, regenerate ------------------------------------
@@ -443,7 +565,9 @@ def test_mock_c3_returns_the_reliefs_the_query_names(text, keys):
 
 
 def _no_extra_documents_runs() -> dict:
-    """The flows without invoices, as captured before relief discovery existed (7ff4906)."""
+    """The flows without invoices, as captured before relief discovery existed (7ff4906).
+    Re-captured once since, on purpose: document ids are neutral ("doc-1") and the trace
+    has `reliefs` (empty here). Nothing else changed."""
 
     def req(ya="2025/26", **kw):
         return TaxRequest(request_id="req-0001", year_of_assessment=ya, **kw)
@@ -468,7 +592,9 @@ def _no_extra_documents_runs() -> dict:
         d = Deps(MockOcrClient(), MockRetrievalClient(), MockAssuranceClient(script))
         res = run(r, d)
         out[name] = {
-            "result": res.model_dump(mode="json", exclude={"documents", "relief_findings"}),
+            "result": res.model_dump(
+                mode="json", exclude={"documents", "relief_findings", "reliefs"}
+            ),
             "traces": [t.model_dump(mode="json") for t in d.assurance.traces],
             "c3_requests": [q.model_dump(mode="json") for q in d.retrieval.requests],
         }

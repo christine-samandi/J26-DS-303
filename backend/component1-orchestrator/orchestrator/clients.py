@@ -91,6 +91,8 @@ class MockRetrievalClient:
     A relief query (rule_types == ["relief"] with text, as stages.discover_reliefs sends)
     is answered from `retrieval_reliefs_yaYYYY_YY.json` instead, keeping the reliefs the
     text names by C3's own keywords (`relief_keywords.json`), as C3 does for a named relief.
+    Reliefs not in force on the YA start (e.g. the expenditure relief, ended 2022) are kept
+    only with include_history, with C3's warnings for that case.
     """
 
     def __init__(self, path: Path | None = None) -> None:
@@ -122,14 +124,20 @@ class MockRetrievalClient:
         keywords = json.loads(RELIEF_KEYWORDS.read_text(encoding="utf-8"))["keywords"]
         text = request.query_text.lower()
         named = {k for k, words in keywords.items() if any(_names(w, text) for w in words)}
-        results = [r for r in data["results"] if r["rule_key"] in named][: request.top_k]
+        matched = [r for r in data["results"] if r["rule_key"] in named]
+        in_force = [r for r in matched if r["validity"]["in_force_on_as_of_date"]]
+        results = (matched if request.include_history else in_force)[: request.top_k]
         for rank, r in enumerate(results, start=1):
             r["rank"] = rank
         data["request_id"] = request.request_id
         data["query"] |= {"query_text": request.query_text, "as_of_date": str(request.as_of_date),
-                          "top_k": request.top_k}  # fmt: skip
+                          "top_k": request.top_k,
+                          "include_history": request.include_history}  # fmt: skip
         data["results"] = results
-        data["warnings"] = [] if results else ["NO_MATCH"]
+        if not matched:
+            data["warnings"] = ["NO_MATCH"]
+        else:  # as C3: a relief that matched but is not in force on the date
+            data["warnings"] = [] if in_force else ["NO_RULE_IN_FORCE_ON_DATE"]
         return RetrievalOutput.model_validate(data)
 
 
@@ -137,13 +145,15 @@ class HttpRetrievalClient:
     """C3's real GraphRAG service: POST <base_url>/retrieve with the frozen retrieval contract.
 
     Both directions are validated with the shared j26_contracts models. Keeps the last answer
-    (`last`) so the UI can show which law was used. Standard library only (no new dependency).
+    (`last`) and every answer in order (`answers`: the rules first, then one per relief
+    query) so the UI can show which law was used. Standard library only (no new dependency).
     """
 
     def __init__(self, base_url: str = C3_DEFAULT_URL, timeout_s: float = 30.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
         self.last: RetrievalOutput | None = None
+        self.answers: list[RetrievalOutput] = []
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalOutput:
         url = f"{self.base_url}/retrieve"
@@ -156,6 +166,7 @@ class HttpRetrievalClient:
             self.last = RetrievalOutput.model_validate_json(raw)
         except ValidationError as e:
             raise ComponentUnavailable(f"C3's answer breaks the retrieval contract: {e}") from e
+        self.answers.append(self.last)
         return self.last
 
 
@@ -188,8 +199,10 @@ class HttpOcrClient:
     """C2's real OCR service: uploads a document to POST <base_url>/extract.
 
     The UI registers the uploaded files first (`add`); the document ref in the TaxRequest is
-    the name `add` returns. C2's answer (ocr_output v0.1) is mapped to C1's OcrResult:
-    gross_income -> employment_income, apit -> apit_paid, with C2's per-field confidence.
+    the neutral id `add` returns ("doc-<n>", the n-th file added). C2 gets that id, never the
+    file name: the upload is sent as "doc-<n>.<extension>". C2's answer (ocr_output v0.1) is
+    mapped to C1's OcrResult: gross_income -> employment_income, apit -> apit_paid, with C2's
+    per-field confidence.
 
     A payslip is usually one month, while the tax is for the whole year: `months_covered`
     (1 = monthly payslip, 12 = annual summary) scales the amounts to a year. The scaling is an
@@ -210,12 +223,14 @@ class HttpOcrClient:
         self.timeout_s = timeout_s
         self.uploads: dict[str, tuple[str, bytes]] = {}
         self.last: dict | None = None
+        self.reads: dict[str, dict] = {}  # document ref -> C2's raw answer, every document
         self.notes: list[str] = []
 
     def add(self, filename: str, data: bytes) -> str:
-        """Register an uploaded file; returns the document ref to put in the TaxRequest."""
-        ref = Path(filename).stem or "upload"
-        self.uploads[ref] = (filename, data)
+        """Register an uploaded file; returns its document ref ("doc-<n>") for the TaxRequest.
+        Add the files in the order they go in TaxRequest.documents, so ref n is document n."""
+        ref = f"doc-{len(self.uploads) + 1}"
+        self.uploads[ref] = (f"{ref}{Path(filename).suffix.lower()}", data)
         return ref
 
     def _post(self, path: str, document: str) -> bytes:
@@ -234,7 +249,7 @@ class HttpOcrClient:
 
     def extract(self, request_id: str, document: str) -> OcrResult:
         try:
-            self.last = out = json.loads(self._post("/extract", document))
+            self.last = self.reads[document] = out = json.loads(self._post("/extract", document))
         except json.JSONDecodeError as e:
             raise ComponentUnavailable(f"C2 did not answer with JSON: {e}") from e
         self.notes = []
@@ -348,21 +363,44 @@ def c4_payload(trace: PipelineTrace) -> tuple[str, dict]:
     Claims without a citation (S5, S6) and citations of rules without evidence (seed rules
     when C3 is off) are left out: C4 would read them as missing or unknown sources. With no
     claim left, only the line-item check is sent.
+
+    A relief claimed on a document (e.g. solar, S1_SOLAR_PANEL_RELIEF) cites its C3 rule like
+    any step, and also its amount: one more source per relief, named after the neutral
+    document ids ("doc-1:amount_paid"), saying the amount and where it came from (confirmed
+    by the user, or read by OCR), with a claim for the step citing it. C4's request models
+    forbid extra fields, so this is how C4 sees the amount's source. No file names, no issuer.
     """
     total = next(s for s in trace.calc_steps if s.step_id == "S4_TOTAL_TAX")
     # No band reached means the total is 0; C4 needs at least one line item.
     line_items = [_money(v) for v in total.inputs.values() if v is not None] or ["0"]
-    evidence = {
-        ref.rule_id: ref.evidence
-        for ref in (trace.rules.personal_relief.ref, trace.rules.tax_bands.ref)
-        if ref.evidence and ref.evidence.strip()
-    }
+    refs = (
+        trace.rules.personal_relief.ref,
+        trace.rules.tax_bands.ref,
+        *(r.rule.ref for r in trace.reliefs),
+    )
+    evidence = {ref.rule_id: ref.evidence for ref in refs if ref.evidence and ref.evidence.strip()}
     claims = [
         {"claim_id": f"{c.claim_id}/{rule_id}", "source_id": rule_id, "excerpt": evidence[rule_id]}
         for c in trace.claims
         for rule_id in c.citation_refs
         if rule_id in evidence
     ]
+    amounts = {}  # source_id -> text, one per relief with an amount paid
+    for relief in trace.reliefs:
+        if relief.base is None or not relief.document_ids:
+            continue
+        source_id = f"{'+'.join(relief.document_ids)}:amount_paid"
+        amounts[source_id] = amount_source_text(relief)
+        step_id = f"S1_{relief.rule.rule_key.upper()}"
+        claims += [
+            {
+                "claim_id": f"{c.claim_id}/{source_id}",
+                "source_id": source_id,
+                "excerpt": amounts[source_id],
+            }  # fmt: skip
+            for c in trace.claims
+            if c.step_id == step_id
+        ]
     body = {
         "reported_total": _money(total.result),
         "line_items": line_items,
@@ -373,8 +411,21 @@ def c4_payload(trace: PipelineTrace) -> tuple[str, dict]:
     if not claims:
         return "/assurance/line-item-check", body
     cited = sorted({c["source_id"] for c in claims})
-    sources = [{"source_id": rule_id, "text": evidence[rule_id]} for rule_id in cited]
+    texts = evidence | amounts
+    sources = [{"source_id": source_id, "text": texts[source_id]} for source_id in cited]
     return "/assurance/combined-check", body | {"claims": claims, "sources": sources}
+
+
+AMOUNT_SOURCES = {"user": "confirmed by the user", "ocr": "read by OCR"}
+
+
+def amount_source_text(relief) -> str:
+    """'Amount paid 800000.00 on the invoice doc-1, confirmed by the user': what C4 is told
+    about a relief's amount. Neutral ids only."""
+    kind = relief.document_type or "document"
+    docs = ", ".join(relief.document_ids)
+    how = AMOUNT_SOURCES.get(relief.base_source or "", "source not recorded")
+    return f"Amount paid {_money(relief.base)} on the {kind} {docs}, {how}"
 
 
 class HttpAssuranceClient:

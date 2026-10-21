@@ -33,8 +33,11 @@ Assurance = Literal["mock", "live", "unavailable"]  # who checked the result, if
 Answer = Literal["yes", "no"]  # to a relief condition question; unanswered = left out
 # applied: in the calculation. not_applied: a condition fails (date, a "No" answer).
 # needs_review: something is missing, so it is not applied and a person must look.
-# not_supported: needs an income type C1 does not calculate yet. no_relief: C3 found none.
-ReliefStatus = Literal["applied", "not_applied", "needs_review", "not_supported", "no_relief"]
+# not_supported: needs an income type C1 does not calculate yet. no_relief: C3 found none in
+# force for the YA. withdrawn: C3 found a matching relief, but it ended before the YA.
+ReliefStatus = Literal[
+    "applied", "not_applied", "needs_review", "not_supported", "no_relief", "withdrawn"
+]
 # payslip: used for income and APIT. relief_candidate: invoice/receipt, checked for reliefs.
 # not_analysed: bank statements and unknown documents, listed only.
 DocumentRole = Literal["payslip", "relief_candidate", "not_analysed"]
@@ -53,7 +56,7 @@ class DocumentInput(_Frozen):
     user confirmed here, and only when every condition question is answered.
     """
 
-    document: str  # the document ref, as in TaxRequest.documents
+    document: str  # the document's neutral id: "doc-<n>" for the n-th of TaxRequest.documents
     payment_for: str | None = None  # "What was this payment for?"
     amount_paid: Decimal | None = None  # confirmed by the user
     document_date: date | None = None  # confirmed by the user
@@ -67,7 +70,9 @@ class TaxRequest(_Frozen):
     year_of_assessment: str
     employment_income: Decimal | None = None
     apit_paid: Decimal | None = None
-    documents: tuple[str, ...] = ()  # document refs handed to C2
+    # Document refs handed to C2 (a mock file stem or HttpOcrClient.add's id). They go no
+    # further: from extract on, the n-th document is "doc-<n>" (orchestrator.stages.doc_id).
+    documents: tuple[str, ...] = ()
     document_inputs: tuple[DocumentInput, ...] = ()
 
 
@@ -155,6 +160,7 @@ class ReliefFinding(_Frozen):
     amount_paid: Decimal | None = None
     remaining_claimable: Decimal | None = None  # paid above this YA's cap; display only
     retrieval_confidence: Confidence | None = None
+    valid_to: date | None = None  # withdrawn: the last day the relief was valid (C3)
 
 
 class ConfidenceBreakdown(_Frozen):
@@ -178,6 +184,9 @@ class PipelineTrace(_Frozen):
     rules: RuleSet
     retrieval_rule_ids: tuple[str, ...]
     calc_steps: tuple[CalcStep, ...]
+    # The reliefs applied besides personal relief: rule, C3 evidence, and the amount paid
+    # with where it came from (base_source) and which documents ("doc-<n>") back it
+    reliefs: tuple[ReliefClaim, ...] = ()
     claims: tuple[Claim, ...]
     explanation: Explanation  # what the user is shown, with used_fallback/hallucination_flag
     llm_calls: tuple[LlmCall, ...]  # this attempt's LLM calls; empty when no LLM was used
@@ -201,6 +210,7 @@ class OrchestratorResult(_Frozen):
     stages_run: tuple[str, ...] = ()
     documents: tuple[DocumentSummary, ...] = ()
     relief_findings: tuple[ReliefFinding, ...] = ()
+    reliefs: tuple[ReliefClaim, ...] = ()  # applied besides personal relief; calc cites them
     pii_redacted: int = 0  # PII values redacted from the explanation prompt; not sent to C4
     assurance: Assurance = "mock"
     assurance_note: str = ""  # says what checked the result, or why nothing did
@@ -214,7 +224,7 @@ class PipelineState(TypedDict, total=False):
     ocr_results: tuple[OcrResult, ...]
     profile: TaxpayerProfile
     documents: tuple[DocumentSummary, ...]
-    relief_candidates: tuple[OcrResult, ...]  # invoices and receipts
+    relief_candidates: tuple[OcrResult, ...]  # invoices and receipts, ids neutral
     relief_claims: tuple[ReliefClaim, ...]  # reliefs to apply, one per rule
     relief_findings: tuple[ReliefFinding, ...]
     relief_retrievals: tuple[RetrievalOutput, ...]  # C3's answers for the relief queries

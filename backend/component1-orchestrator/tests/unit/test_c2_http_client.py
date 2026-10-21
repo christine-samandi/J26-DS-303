@@ -95,7 +95,7 @@ def test_monthly_payslip_is_mapped_and_annualised(fake_c2):
     client, ref = _client(c2)
     out = client.extract("req-1", ref)
 
-    assert ref == "SYN_payslip_clean" and out.document_type == "payslip"
+    assert ref == "doc-1" and out.document_type == "payslip"
     assert {f.name: (f.value, f.confidence) for f in out.fields} == {
         "employment_income": (D("1800000.00"), D("0.988")),
         "apit_paid": (D("42000.00"), D("0.988")),
@@ -105,7 +105,16 @@ def test_monthly_payslip_is_mapped_and_annualised(fake_c2):
     ((path, ctype, body),) = c2.calls
     assert path.startswith("/extract?") and "lang=auto" in path  # C2 detects the scripts
     assert ctype.startswith("multipart/form-data; boundary=")
-    assert b'filename="SYN_payslip_clean.png"' in body and b"image bytes" in body
+    assert b'filename="doc-1.png"' in body and b"image bytes" in body
+    assert b"SYN_payslip" not in body and "SYN_payslip" not in path  # C2 never sees the name
+    assert "doc_id=doc-1" in path and client.reads == {"doc-1": client.last}
+
+
+def test_uploads_get_neutral_ids_in_the_order_they_are_added(fake_c2):
+    client = HttpOcrClient(fake_c2().url)
+    refs = [client.add(n, b"x") for n in ("Payslip Sept.PNG", "solar invoice.pdf", "x")]
+    assert refs == ["doc-1", "doc-2", "doc-3"]
+    assert [name for name, _ in client.uploads.values()] == ["doc-1.png", "doc-2.pdf", "doc-3"]
 
 
 def test_annual_summary_is_not_scaled(fake_c2):
