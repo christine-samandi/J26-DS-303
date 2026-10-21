@@ -52,6 +52,10 @@ LABELS = [
 LABEL_RE = [(kind, re.compile(rf"^\W*({pat})\s*[:\-]?\s*$", re.I)) for kind, pat in LABELS]
 ADDRESS_LINE = re.compile(r"^\W*no\.?\s*\d+(/\d+)*|\b(road|rd|mawatha|lane|place|street|avenue|para|watta|junction|"
                           r"පාර|මාවත|வீதி)\b", re.I)
+# A line naming a statutory fund or tax is a field label, never a person: initials 'E.P.F.' are not a name
+FIELD_ABBREV = re.compile(r"\b(?:e\.?\s?p\.?\s?f|e\.?\s?t\.?\s?f|w\.?\s?&\s?o\.?\s?p|p\.?\s?a\.?\s?y\.?\s?e|a\s?p\s?i\s?t)\b", re.I)
+# Money labels: a long number on such a line is an amount printed without separators ('4339511.65'), not an id
+MONEY_LINE = re.compile(r"\b(?:lkr|rs|amount|remuneration|benefits?|salary|gross|tax|total|earnings)\b", re.I)
 KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|date|page|currency|lkr|"
                         r"pay\s*slip|payslip|salary|department|balance|total|"
                         # document titles on purchase documents: 'TAX INVOICE' under a seller's address
@@ -60,6 +64,8 @@ KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|d
                         # seller and line-item words on purchase documents: never personal data, but
                         # a misgrouped line (a tilted photo) put 'Solar' and 'Invoice' next to the buyer's name
                         r"solar|solutions|foundation|services|engineering|electricity|broadband|networks|"
+                        # payslip label words: 'E.P.F. EMPLOYEE CONTRIBUTION' looked like initials + a name
+                        r"contribution|employee|employer|allowance|deductions?|gross|earnings|loan|"
                         r"distribution|panel|inverter|seal|signature|advance|amount|due|paid)\b", re.I)
 
 
@@ -124,7 +130,8 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
             t = texts[j].strip(".,:;()[]'\"-|")
             if NIC_OLD.match(t) or NIC_NEW.match(t):
                 mark([i], "nic")
-            elif LONG_ID.match(t) or (n < header_rows and HEADER_ID.match(t)):
+            elif (LONG_ID.match(t) or (n < header_rows and HEADER_ID.match(t))) \
+                    and not MONEY_LINE.search(" ".join(texts)):
                 mark([i], "long_id")
         joined = " ".join(texts)
         for pat, kind in ((PHONE, "phone"), (CARD, "card")):
@@ -166,6 +173,8 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
 
     # 3. Sri Lankan name pattern in the page header: initials followed by a capitalised name
     for ix in lines[:header_rows]:
+        if FIELD_ABBREV.search(" ".join(toks[i].text for i in ix)):
+            continue
         j = 0
         while j < len(ix):
             k = j

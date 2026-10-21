@@ -31,6 +31,10 @@ KEYWORDS: Dict[str, List[str]] = {
         "pay slip", "payslip", "salary slip", "pay statement", "basic salary", "basic pay", "gross salary",
         "gross pay", "net salary", "net pay", "epf", "etf", "apit", "paye", "allowance", "allowances",
         "total deductions", "earnings", "employee no", "employee id", "designation",
+        "total deduction", "consolidated salary", "salary to bank", "liable gross",
+        # annual employer certificate of employment income and APIT (PS_003)
+        "gross remuneration", "total gross remuneration", "amount of tax deducted", "tax deducted",
+        "benefits excluded for tax", "tax on tax", "cash benefits", "non cash benefits",
         "මුළු ආදායම", "ශුද්ධ වැටුප", "වැටුප", "බෝනස්", "දීමනාව", "මුළු අඩුකිරීම්",   # real Sinhala payslip
         "වැටුප් පත්‍රිකාව", "මූලික වැටුප", "සම්බළ", "சம்பளச் சீட்டு", "அடிப்படைச் சம்பளம்",   # TODO verify
     ],
