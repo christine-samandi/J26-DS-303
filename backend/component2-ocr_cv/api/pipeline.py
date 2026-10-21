@@ -155,6 +155,15 @@ def reading_quality(tokens: Sequence, report: dict, n_fields: int) -> Tuple[int,
     return hard, n_fields, round(share, 2)
 
 
+INVOICE_TYPES = ("invoice", "receipt", "quotation")
+TOTAL_CHECKS = ("items_sum", "items_sum_before_tax", "totals_chain", "balance")
+
+
+def invoice_complete(report: dict) -> bool:
+    """An invoice reading is complete when at least one totals equation was read and holds."""
+    return any(c.get("rule") in TOTAL_CHECKS and c.get("passed") for c in report.get("checks", []))
+
+
 def looks_broken(quality: Tuple[int, int, float]) -> bool:
     hard, _, share = quality
     return hard == 0 or share < GOOD_DECIMAL_SHARE
@@ -244,6 +253,24 @@ def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing:
                         out, report = f_out, f_report
                         reading.update(used="3 readings fused by payslip arithmetic",
                                        reason="no single reading passed the checks; fused fields pass more")
+            if out.document_type in INVOICE_TYPES and not invoice_complete(report) and \
+                    (out.document_type != "receipt" or "total_amount" not in {f.field_name for f in out.extracted_fields}):
+                # Coloured cells (shaded table header, highlighted 'Sub Total' box) vanish in BOTH
+                # tone-processed readings (IN_004: no header, no subtotal). The plain page - only the
+                # geometric steps - keeps them; the invoice arithmetic decides which reading is kept.
+                plain = preprocess(img, steps=[st for st in res.steps_applied if st in GEOMETRIC]).image
+                plain_tokens = guard(run_tesseract(plain, lang=lang, psm=6))
+                p_out, p_report = extract_document(plain_tokens, doc_id=doc_id,
+                                                   engine=ENGINE_LABELS.get(engine, engine),
+                                                   to_original=to_original)
+                now = reading_quality(tokens, report, len(out.extracted_fields))
+                plain_q = reading_quality(plain_tokens, p_report, len(p_out.extracted_fields))
+                reading.update(plain=plain_q)
+                if plain_q > now:
+                    tokens, out, report = plain_tokens, p_out, p_report
+                    reading.update(used="plain page (no tone processing)",
+                                   reason="the invoice totals did not add up in the processed readings; "
+                                          "the plain page passes more checks")
             report["reading"] = reading
     out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
