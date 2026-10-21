@@ -1,0 +1,10 @@
+{
+  "document_type": "receipt",
+  "total_amount": 25000.0,
+  "seller_reg_no": "GA/2019/0456",
+  "document_number": "DR-2026-0318",
+  "document_date": "2026-09-05 (ambiguous 05/09: flagged)",
+  "attributes": {
+    "Purpose": "School supplies programme"
+  }
+}

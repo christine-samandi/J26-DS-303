@@ -57,7 +57,8 @@ CONFIDENCE_METHOD = (
     "+ 0.15 extraction confidence + 0.25 temporal match; high >= 0.80, medium >= 0.50"
 )
 KEYWORDS = {  # words that name a rule directly
-    "personal_relief": ["personal relief", "tax free", "tax-free"],
+    "personal_relief": ["personal relief", "tax free", "tax-free", "without paying tax",
+                        "without paying any tax", "tax threshold", "pay no tax"],
     "individual_income_tax_slabs": ["slab", "band", "bracket", "tax rate", "rates of tax",
                                     "progressive", "tax table", "income tax rate", "how much tax",
                                     "tax payable", "tax on my", "tax do i pay"],
@@ -209,12 +210,18 @@ class Match:
 
 
 NOT_INDIVIDUALS = {"company", "partnership", "trust", "charitable_institution"}
+# "I work for a US company": the company is who pays the individual, not who is taxed
+WORKS_FOR = re.compile(
+    r"\b(?:work\w*|employ\w*|job|freelanc\w*|contract\w*|paid|consult\w*)\b[^.?!]{0,30}?"
+    r"\b(?:for|at|with|by|from)\s+(?:a|an|the)\s+(?:[\w.&-]+\s+){0,2}?compan(?:y|ies)\b"
+)
 
 
 def _asks_about_others(text: str) -> bool:
     """The question names only taxpayers who are not individuals ("tax rate for companies")."""
     from entity_recognition.extract import extract_entities
 
+    text = WORKS_FOR.sub(" ", text.lower())
     named = {e.value for e in extract_entities(text) if e.label == "TAXPAYER_CATEGORY"}
     return bool(named) and named <= NOT_INDIVIDUALS
 
@@ -250,6 +257,8 @@ def _rule_matches(req: RetrievalRequest, data: GraphData) -> dict[str, Match]:
         elif rule["rule_type"] == "relief" and any(_says(k, text, stems) for k in GENERIC_RELIEF):
             best.relevance = max(best.relevance, 0.7 if key == DEFAULT_RELIEF else 0.65)
             best.graph_match = best.graph_match or 0.6
+        elif rule["rule_type"] == "relief":  # a relief only when the question asks about one:
+            continue  # "tax on lottery winnings" shares words with relief text, but is not one
         if best.relevance >= MIN_RELEVANCE:
             matches[key] = best
     if named:  # "relief for solar panels": the solar relief, not every relief

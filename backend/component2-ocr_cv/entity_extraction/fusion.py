@@ -137,7 +137,7 @@ def fuse_candidates(per_engine: Dict[str, Dict[str, Candidate]]) -> Tuple[Dict[s
 
 
 def extract_fused(tokens_by_engine: Dict[str, Sequence], doc_id: str, processing_ms: Optional[int] = None,
-                  to_original: Optional[Callable[[List[int]], List[int]]] = None):
+                  to_original: Optional[Callable[[List[int]], List[int]]] = None, engine_label: str = FUSION_ENGINE):
     """Classify with every engine (keep the most confident answer), then fuse payslip fields.
     tokens_by_engine must all be in the same image coordinates (the same preprocessed image)."""
     from document_classifier import classify_tokens
@@ -153,7 +153,7 @@ def extract_fused(tokens_by_engine: Dict[str, Sequence], doc_id: str, processing
                       "per_engine": {e: classes[e].document_type for e in engines}}
 
     if cls.document_type != "payslip":
-        out, report = extract_document(tokens_by_engine[lead], doc_id=doc_id, engine=FUSION_ENGINE,
+        out, report = extract_document(tokens_by_engine[lead], doc_id=doc_id, engine=engine_label,
                                        processing_ms=processing_ms, to_original=to_original)
         report["classification"] = classification
         report["fusion"] = {"note": f"no field fusion for {cls.document_type}; used {lead}"}
@@ -163,7 +163,7 @@ def extract_fused(tokens_by_engine: Dict[str, Sequence], doc_id: str, processing
     fused, decisions = fuse_candidates(per_engine)
     # Sinhala/Tamil detection uses Tesseract's tokens when present (PaddleOCR has no Sinhala model)
     lang_tokens = tokens_by_engine.get("tesseract", tokens_by_engine[lead])
-    out, report = extract_payslip(lang_tokens, doc_id, engine=FUSION_ENGINE, processing_ms=processing_ms,
+    out, report = extract_payslip(lang_tokens, doc_id, engine=engine_label, processing_ms=processing_ms,
                                   to_original=to_original, document_type="payslip", candidates=fused)
     report["classification"] = classification
     report["fusion"] = {"decisions": [d.to_dict() for d in decisions],

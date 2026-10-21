@@ -1,4 +1,4 @@
-"""Document type classification: payslip | bank_statement | invoice | receipt | unknown (FR8).
+"""Document type classification: payslip | bank_statement | invoice | receipt | quotation | unknown (FR8).
 
 Why this module exists:
 - Each document type needs a different extractor (a payslip has EPF/ETF, a utility bill has
@@ -31,6 +31,10 @@ KEYWORDS: Dict[str, List[str]] = {
         "pay slip", "payslip", "salary slip", "pay statement", "basic salary", "basic pay", "gross salary",
         "gross pay", "net salary", "net pay", "epf", "etf", "apit", "paye", "allowance", "allowances",
         "total deductions", "earnings", "employee no", "employee id", "designation",
+        "total deduction", "consolidated salary", "salary to bank", "liable gross",
+        # annual employer certificate of employment income and APIT (PS_003)
+        "gross remuneration", "total gross remuneration", "amount of tax deducted", "tax deducted",
+        "benefits excluded for tax", "tax on tax", "cash benefits", "non cash benefits",
         "මුළු ආදායම", "ශුද්ධ වැටුප", "වැටුප", "බෝනස්", "දීමනාව", "මුළු අඩුකිරීම්",   # real Sinhala payslip
         "වැටුප් පත්‍රිකාව", "මූලික වැටුප", "සම්බළ", "சம்பளச் சீட்டு", "அடிப்படைச் சம்பளம்",   # TODO verify
     ],
@@ -47,13 +51,41 @@ KEYWORDS: Dict[str, List[str]] = {
         "payment due", "previous balance", "account summary", "vat", "sscl", "subscriber", "customer id",
         "broadband", "usage", "monthly rental", "telephone", "electricity", "water bill",
         "බිල්පත", "பட்டியல்",                                                                  # TODO verify
+        "invoice no", "invoice number", "invoice date", "bill to", "supplier s tin", "unit price", "unit cost",
+        "description", "sub total", "grand total", "payment terms", "terms", "gstin",
+        "ඉන්වොයිසිය", "ඉන්වොයිස් අංකය", "ගෙවිය යුතු මුදල", "ඒකක මිල",                          # TODO verify
     ],
     "receipt": [
         "receipt", "cash", "change", "subtotal", "sub total", "qty", "item", "cashier", "tendered",
         "thank you", "pos", "card no", "bill no", "price",
         "රිසිට්පත", "ரசீது",                                                                    # TODO verify
+        "received from", "received with thanks", "the sum of", "donation", "amount in words", "receipt no",
+        "ලදුපත", "ලැබුණු", "පරිත්‍යාගය", "ලදුපත් අංකය", "ලැබීම",                                   # TODO verify
+    ],
+    # A quotation/estimate is a PRICE OFFER, not proof that money was spent; tax relief needs the
+    # invoice or receipt, so it must never be read as one.
+    "quotation": [
+        "quotation", "quote", "estimate", "cost estimate", "contractor estimate", "proforma", "pro forma",
+        "proforma invoice", "valid until", "validity", "expected start date", "expected completion",
+        "payment schedule", "මිල ගණන්", "මිල ගණන් පත්‍රය", "ඇස්තමේන්තුව", "விலைப்புள்ளி",          # TODO verify
     ],
 }
+
+# Title evidence: the document's own heading ('INVOICE', 'Quotation', 'RECEIPT') is the strongest cue,
+# stronger than body words ('Invoice No.' printed on a quotation form). Title = words in the top part
+# of the page or printed much larger than the body text.
+TITLES: Dict[str, List[str]] = {
+    "invoice": ["invoice", "tax invoice", "bill", "ඉන්වොයිසිය", "බිල්පත"],
+    "receipt": ["receipt", "official receipt", "donation receipt", "ලදුපත", "රිසිට්පත"],
+    "quotation": ["quotation", "quote", "estimate", "cost estimate", "proforma invoice", "මිල ගණන් පත්‍රය",
+                  "ඇස්තමේන්තුව"],
+    "payslip": ["pay slip", "payslip", "salary slip", "වැටුප් පත්‍රිකාව"],
+    "bank_statement": ["statement of account", "account statement", "bank statement"],
+}
+TITLE_WEIGHT = 8      # the heading is near-decisive: a quotation form may still print "Invoice No."
+TITLE_TOP_SHARE = 0.2     # top 20% of the text area
+TITLE_SIZE = 1.6          # or letters at least 1.6x the median height
+MIN_LINES_FOR_TITLE = 4   # a single text line has no 'top part'
 
 MIN_EVIDENCE = 2      # at least 2 different key phrases of the winning type
 MIN_MARGIN = 1        # and at least 1 more than the runner-up
@@ -108,10 +140,20 @@ def balance_chain(lines: Sequence[str]) -> tuple[int, int]:
     return len(rows), ok
 
 
-def classify_text(text: str) -> Classification:
-    """Classify OCR text. Lines (separated by newlines) are used for the running-balance check."""
+def classify_text(text: str, title: str = "") -> Classification:
+    """Classify OCR text. Lines (separated by newlines) are used for the running-balance check.
+    `title` is the heading text (see title_text); a type named in it gets TITLE_WEIGHT evidence."""
     norm = _normalise(text)
     evidence = {t: [k for k in kws if f" {_normalise(k).strip()} " in norm] for t, kws in KEYWORDS.items()}
+    if title:
+        tnorm = _normalise(title)
+        hits = {t: max((k for k in names if f" {_normalise(k).strip()} " in tnorm), key=len, default=None)
+                for t, names in TITLES.items()}
+        best_len = max((len(k) for k in hits.values() if k), default=0)
+        for t, k in hits.items():
+            # 'proforma invoice' names a quotation; the longer title phrase wins over 'invoice'
+            if k and len(k) == best_len:
+                evidence[t] += [f"[title] {k}"] * TITLE_WEIGHT
 
     rows, ok = balance_chain(text.splitlines())
     if rows >= MIN_TABLE_ROWS and ok >= MIN_CHAIN_SHARE * (rows - 1):
@@ -133,6 +175,22 @@ def classify_text(text: str) -> Classification:
                           f"{s1} {best} evidence points vs {s2} for the next type")
 
 
+def title_text(tokens: Sequence) -> str:
+    """Heading words: in the top TITLE_TOP_SHARE of the text area, or much larger than the body text."""
+    toks = [t for t in tokens if getattr(t, "bbox", None) and t.text.strip()]
+    if not toks:
+        return ""
+    heights = sorted(t.bbox[3] for t in toks)
+    median = heights[len(heights) // 2]
+    centres = sorted({round((t.bbox[1] + t.bbox[3] / 2) / max(1, median)) for t in toks})
+    if len(centres) < MIN_LINES_FOR_TITLE:
+        return ""
+    top = min(t.bbox[1] for t in toks)
+    bottom = max(t.bbox[1] + t.bbox[3] for t in toks)
+    limit = top + TITLE_TOP_SHARE * (bottom - top)
+    return " ".join(t.text for t in toks if t.bbox[1] + t.bbox[3] / 2 <= limit or t.bbox[3] >= TITLE_SIZE * median)
+
+
 def classify_tokens(tokens: Sequence, min_confidence: float = 0.4) -> Classification:
     """Classify from OCR tokens, ignoring very low-confidence fragments (noise, logos).
 
@@ -142,4 +200,5 @@ def classify_tokens(tokens: Sequence, min_confidence: float = 0.4) -> Classifica
     for t in tokens:
         if t.confidence >= min_confidence:
             lines.setdefault(getattr(t, "line_id", "0"), []).append(t.text)
-    return classify_text("\n".join(" ".join(ws) for ws in lines.values()))
+    title = title_text([t for t in tokens if t.confidence >= min_confidence])
+    return classify_text("\n".join(" ".join(ws) for ws in lines.values()), title=title)

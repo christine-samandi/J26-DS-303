@@ -52,8 +52,21 @@ LABELS = [
 LABEL_RE = [(kind, re.compile(rf"^\W*({pat})\s*[:\-]?\s*$", re.I)) for kind, pat in LABELS]
 ADDRESS_LINE = re.compile(r"^\W*no\.?\s*\d+(/\d+)*|\b(road|rd|mawatha|lane|place|street|avenue|para|watta|junction|"
                           r"පාර|මාවත|வீதி)\b", re.I)
+# A line naming a statutory fund or tax is a field label, never a person: initials 'E.P.F.' are not a name
+FIELD_ABBREV = re.compile(r"\b(?:e\.?\s?p\.?\s?f|e\.?\s?t\.?\s?f|w\.?\s?&\s?o\.?\s?p|p\.?\s?a\.?\s?y\.?\s?e|a\s?p\s?i\s?t)\b", re.I)
+# Money labels: a long number on such a line is an amount printed without separators ('4339511.65'), not an id
+MONEY_LINE = re.compile(r"\b(?:lkr|rs|amount|remuneration|benefits?|salary|gross|tax|total|earnings)\b", re.I)
 KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|date|page|currency|lkr|"
-                        r"pay\s*slip|payslip|salary|department|balance|total)\b", re.I)
+                        r"pay\s*slip|payslip|salary|department|balance|total|"
+                        # document titles on purchase documents: 'TAX INVOICE' under a seller's address
+                        # is not a place name (it was masked, then every 'Invoice' label was masked too)
+                        r"invoice|receipt|quotation|estimate|tax|vat|donation|"
+                        # seller and line-item words on purchase documents: never personal data, but
+                        # a misgrouped line (a tilted photo) put 'Solar' and 'Invoice' next to the buyer's name
+                        r"solar|solutions|foundation|services|engineering|electricity|broadband|networks|"
+                        # payslip label words: 'E.P.F. EMPLOYEE CONTRIBUTION' looked like initials + a name
+                        r"contribution|employee|employer|allowance|deductions?|gross|earnings|loan|"
+                        r"distribution|panel|inverter|seal|signature|advance|amount|due|paid)\b", re.I)
 
 
 @dataclass
@@ -117,7 +130,8 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
             t = texts[j].strip(".,:;()[]'\"-|")
             if NIC_OLD.match(t) or NIC_NEW.match(t):
                 mark([i], "nic")
-            elif LONG_ID.match(t) or (n < header_rows and HEADER_ID.match(t)):
+            elif (LONG_ID.match(t) or (n < header_rows and HEADER_ID.match(t))) \
+                    and not MONEY_LINE.search(" ".join(texts)):
                 mark([i], "long_id")
         joined = " ".join(texts)
         for pat, kind in ((PHONE, "phone"), (CARD, "card")):
@@ -145,11 +159,22 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
                     rest = [i for i in ix[j + k:] if toks[i].text.strip(" :-")]
                     if kind == "person_no" and not any(re.search(r"[^\W\d_]", toks[i].text) for i in rest):
                         rest = []                                    # 'Number : 12345' is an employee id, kept
-                    mark([i for i in rest if not _is_amount_or_date(toks[i].text)], kind)
+                    # Stop at a column gap: on two-column pages the rest of the 'line' is another field
+                    cut, prev, keep = [], ix[j + k - 1], set(rest)
+                    for b in ix[j + k:]:
+                        gap = toks[b].bbox[0] - (toks[prev].bbox[0] + toks[prev].bbox[2])
+                        if gap > max(40, 3 * toks[b].bbox[3]):
+                            break
+                        if b in keep:
+                            cut.append(b)
+                        prev = b
+                    mark([i for i in cut if not _is_amount_or_date(toks[i].text) and not KEEP_WORDS.search(toks[i].text)], kind)
                     break
 
     # 3. Sri Lankan name pattern in the page header: initials followed by a capitalised name
     for ix in lines[:header_rows]:
+        if FIELD_ABBREV.search(" ".join(toks[i].text for i in ix)):
+            continue
         j = 0
         while j < len(ix):
             k = j
@@ -187,7 +212,8 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
 
     # 5. Other occurrences of words already masked as a name or address (e.g. the town repeated lower down)
     learned = {toks[i].text.strip(".,").lower() for i, kd in hide.items()
-               if kd in ("name", "address") and len(toks[i].text.strip(".,")) >= 4 and toks[i].text.strip(".,").isalpha()}
+               if kd in ("name", "address") and len(toks[i].text.strip(".,")) >= 4 and toks[i].text.strip(".,").isalpha()
+               and not KEEP_WORDS.search(toks[i].text)}
     repeats = [i for i, t in enumerate(toks) if i not in hide and t.text.strip(".,").lower() in learned]
     if repeats:
         mark(repeats, "repeat")

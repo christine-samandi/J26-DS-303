@@ -226,6 +226,9 @@ def remove_specks(binary: np.ndarray, min_area: int) -> np.ndarray:
 
 # ---------------------------------------------------------------- pipeline
 
+SHRINK_FIRST = 1.25
+
+
 def preprocess(img: np.ndarray, steps: Sequence[str] = DEFAULT_STEPS, *, target_long_side: int = 2000,
                denoise_strength: float | None = None, threshold_block: int = 31, threshold_c: int = 15) -> PreprocessResult:
     """Run the selected steps in a fixed order. Unknown step names raise ValueError so a
@@ -239,10 +242,17 @@ def preprocess(img: np.ndarray, steps: Sequence[str] = DEFAULT_STEPS, *, target_
 
     # Denoise FIRST, at the photo's own resolution: upscaling noisy pixels turns them into
     # blobs that later look like ink. Denoising does not move pixels, so H is unchanged.
+    # Exception: a large phone photo (12 MP, 4080 px) is first SHRUNK - shrinking averages the noise
+    # away instead of enlarging it, and non-local means on 12 MP took ~40 s of a 53 s request (BS_001).
+    shrink_first = "resize" in steps and max(gray.shape[:2]) > SHRINK_FIRST * target_long_side
+    if shrink_first:
+        gray, Hs = resize_long_side(gray, target_long_side)
+        H = Hs @ H
+        res.steps_applied.append("resize")
     if "denoise" in steps:
         gray = denoise(gray, denoise_strength)
         res.steps_applied.append("denoise")
-    if "resize" in steps:
+    if "resize" in steps and not shrink_first:
         gray, Hs = resize_long_side(gray, target_long_side)
         H = Hs @ H
         res.steps_applied.append("resize")
