@@ -126,12 +126,51 @@ def test_full_pipeline_from_an_uploaded_payslip(fake_c2):
     assert result.calc.total_tax == 0 and result.calc.refund == D("42000.00")
 
 
-def test_document_that_is_not_a_payslip_fails_cleanly(fake_c2):
+def test_bank_statement_alone_is_not_analysed_and_gives_no_income(fake_c2):
     client, ref = _client(fake_c2(answer=PAYSLIP | {"document_type": "bank_statement"}))
     request = TaxRequest(request_id="req-0008", year_of_assessment="2025/26", documents=(ref,))
     result = run(request, Deps(client, MockRetrievalClient(), MockAssuranceClient()))
     assert result.status == "failed"
-    assert "'bank_statement', not a payslip" in result.review_reasons[0]
+    assert "no employment income" in result.review_reasons[0]
+    assert client.notes == []  # nothing was scaled: its amounts were not read as a payslip
+
+
+def test_invoice_fields_are_read_unscaled_for_the_user_to_confirm(fake_c2):
+    invoice = {
+        "schema_version": "0.1",
+        "doc_id": "SYN_solar_invoice_2025",
+        "document_type": "invoice",
+        "languages": ["en"],
+        "extracted_fields": [
+            field("issuer", "Sunshine Solar Energy (Pvt) Ltd"),
+            field("document_date", "2025-08-15"),
+            field("total_amount", 800000.0),
+        ],
+        "overall_confidence": 0.97,
+        "needs_review": False,
+    }
+    client, ref = _client(fake_c2(answer=invoice))  # months_covered=1 would scale a payslip x12
+    out = client.extract("req-0010", ref)
+    assert (out.document_type, out.fields) == ("invoice", ())
+    assert out.issuer == "Sunshine Solar Energy (Pvt) Ltd"
+    assert str(out.document_date) == "2025-08-15"
+    assert out.total_amount == D("800000.00")
+    assert client.notes == []
+
+
+def test_unreadable_invoice_fields_are_left_out_not_guessed(fake_c2):
+    invoice = {
+        "schema_version": "0.1",
+        "doc_id": "x",
+        "document_type": "receipt",
+        "languages": ["en"],
+        "extracted_fields": [field("document_date", "15/08/2025"), field("total_amount", "n/a")],
+        "overall_confidence": 0.5,
+        "needs_review": True,
+    }
+    client, ref = _client(fake_c2(answer=invoice))
+    out = client.extract("req-0011", ref)
+    assert (out.issuer, out.document_date, out.total_amount) == (None, None, None)
 
 
 def test_c2_error_and_c2_down_fail_cleanly(fake_c2):

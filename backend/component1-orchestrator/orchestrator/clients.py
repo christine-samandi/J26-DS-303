@@ -6,6 +6,7 @@ The orchestrator only talks to the Protocols, so swapping mock for HTTP is a con
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -68,16 +69,29 @@ class MockOcrClient:
         return OcrResult.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def mock_retrieval_file(day: date) -> Path:
-    """C1's mock C3 answer for the YA (1 April – 31 March) that contains `day`."""
+def mock_retrieval_file(day: date, kind: str = "") -> Path:
+    """C1's mock C3 answer for the YA (1 April – 31 March) that contains `day`.
+    kind="reliefs_" -> the answer for relief queries (an invoice/receipt's issuer or purpose)."""
     start = day.year if day.month >= 4 else day.year - 1
-    return MOCK_DIR / f"retrieval_ya{start}_{(start + 1) % 100:02d}.json"
+    return MOCK_DIR / f"retrieval_{kind}ya{start}_{(start + 1) % 100:02d}.json"
+
+
+RELIEF_KEYWORDS = MOCK_DIR / "relief_keywords.json"
+
+
+def _names(keyword: str, text: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(keyword)}(?:e?s)?\b", text))
 
 
 class MockRetrievalClient:
     """Answers from `mock_data/retrieval_yaYYYY_YY.json` for the YA containing the query's
     as_of_date (C1 queries with the YA start), echoing the caller's request_id. With `path`,
-    every query gets that one file."""
+    every query gets that one file.
+
+    A relief query (rule_types == ["relief"] with text, as stages.discover_reliefs sends)
+    is answered from `retrieval_reliefs_yaYYYY_YY.json` instead, keeping the reliefs the
+    text names by C3's own keywords (`relief_keywords.json`), as C3 does for a named relief.
+    """
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path
@@ -85,6 +99,8 @@ class MockRetrievalClient:
 
     def retrieve(self, request: RetrievalRequest) -> RetrievalOutput:
         self.requests.append(request)
+        if self.path is None and request.rule_types == ["relief"] and request.query_text:
+            return self._reliefs(request)
         path = self.path or mock_retrieval_file(request.as_of_date)
         if not path.is_file():
             raise ComponentUnavailable(
@@ -93,6 +109,27 @@ class MockRetrievalClient:
             )
         data = json.loads(path.read_text(encoding="utf-8"))
         data["request_id"] = request.request_id
+        return RetrievalOutput.model_validate(data)
+
+    def _reliefs(self, request: RetrievalRequest) -> RetrievalOutput:
+        path = mock_retrieval_file(request.as_of_date, "reliefs_")
+        if not path.is_file():
+            raise ComponentUnavailable(
+                f"C1 mock C3 has no reliefs for {request.as_of_date} ({path.name}); "
+                "turn on live C3 for this year"
+            )
+        data = json.loads(path.read_text(encoding="utf-8"))
+        keywords = json.loads(RELIEF_KEYWORDS.read_text(encoding="utf-8"))["keywords"]
+        text = request.query_text.lower()
+        named = {k for k, words in keywords.items() if any(_names(w, text) for w in words)}
+        results = [r for r in data["results"] if r["rule_key"] in named][: request.top_k]
+        for rank, r in enumerate(results, start=1):
+            r["rank"] = rank
+        data["request_id"] = request.request_id
+        data["query"] |= {"query_text": request.query_text, "as_of_date": str(request.as_of_date),
+                          "top_k": request.top_k}  # fmt: skip
+        data["results"] = results
+        data["warnings"] = [] if results else ["NO_MATCH"]
         return RetrievalOutput.model_validate(data)
 
 
@@ -148,7 +185,7 @@ def _multipart(field: str, filename: str, data: bytes) -> tuple[bytes, str]:
 
 
 class HttpOcrClient:
-    """C2's real OCR service: uploads a payslip to POST <base_url>/extract.
+    """C2's real OCR service: uploads a document to POST <base_url>/extract.
 
     The UI registers the uploaded files first (`add`); the document ref in the TaxRequest is
     the name `add` returns. C2's answer (ocr_output v0.1) is mapped to C1's OcrResult:
@@ -157,6 +194,10 @@ class HttpOcrClient:
     A payslip is usually one month, while the tax is for the whole year: `months_covered`
     (1 = monthly payslip, 12 = annual summary) scales the amounts to a year. The scaling is an
     assumption, so it is written to `notes` and the UI shows it. Keeps C2's raw answer in `last`.
+
+    An invoice or receipt is not scaled: its issuer, document_date and total_amount pre-fill
+    what the user confirms (OcrResult.issuer / document_date / total_amount). Any other type
+    (bank statement, unknown) comes back with no fields, to be listed as not analysed.
     """
 
     def __init__(
@@ -199,10 +240,14 @@ class HttpOcrClient:
         self.notes = []
         if out.get("schema_version") != "0.1" or not isinstance(out.get("extracted_fields"), list):
             raise ComponentUnavailable("C2's answer is not ocr_output v0.1")
-        if out.get("document_type") != "payslip":
-            raise ComponentUnavailable(
-                f"C2 read {document!r} as {out.get('document_type')!r}, not a payslip"
-            )
+        document_type = out.get("document_type")
+        if not isinstance(document_type, str):
+            raise ComponentUnavailable("C2's answer has no document_type")
+        if document_type in ("invoice", "receipt"):
+            return self._relief_document(out, document)
+        if document_type != "payslip":
+            return OcrResult(document_id=out.get("doc_id") or document,
+                             document_type=document_type, fields=())  # fmt: skip
         factor = Decimal(12) / Decimal(self.months_covered)
         fields = []
         for f in out["extracted_fields"]:
@@ -231,6 +276,29 @@ class HttpOcrClient:
             document_id=out.get("doc_id") or document,
             document_type=out["document_type"],
             fields=tuple(fields),
+        )
+
+    def _relief_document(self, out: dict, document: str) -> OcrResult:
+        """issuer, document_date and total_amount, as read; unreadable values are left out
+        (the user types them), never guessed."""
+        by_name = {f.get("field_name"): f.get("value") for f in out["extracted_fields"]}
+        issuer = by_name.get("issuer")
+        try:
+            day = date.fromisoformat(str(by_name["document_date"]))
+        except (KeyError, ValueError):
+            day = None
+        try:
+            total = Decimal(str(by_name["total_amount"])).quantize(Decimal("0.01"))
+            total = total if total.is_finite() and total >= 0 else None
+        except (KeyError, InvalidOperation):
+            total = None
+        return OcrResult(
+            document_id=out.get("doc_id") or document,
+            document_type=out["document_type"],
+            fields=(),
+            issuer=issuer.strip() if isinstance(issuer, str) and issuer.strip() else None,
+            document_date=day,
+            total_amount=total,
         )
 
     def visual(self, document: str) -> bytes:

@@ -3,6 +3,6 @@ placeholders before text goes to an external LLM and put back in its reply. Rege
 names the caller already knows (e.g. an OCR employee-name field); no NLP model.
 """
 
-from pii.redact import Redaction, redact, restore
+from pii.redact import Redaction, redact, restore, strip_identifiers
 
-__all__ = ["Redaction", "redact", "restore"]
+__all__ = ["Redaction", "redact", "restore", "strip_identifiers"]

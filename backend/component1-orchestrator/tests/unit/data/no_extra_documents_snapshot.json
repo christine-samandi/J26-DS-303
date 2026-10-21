@@ -1,0 +1,3698 @@
+{
+ "payslip_clean": {
+  "c3_requests": [
+   {
+    "as_of_date": "2025-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   }
+  ],
+  "result": {
+   "assurance": "mock",
+   "assurance_note": "C4 is mocked: its verdicts are scripted, not a real check.",
+   "attempt": 1,
+   "calc": {
+    "apit_paid": "50000",
+    "employment_income": "3000000",
+    "refund": "0",
+    "steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "tax_payable": "46000.00",
+    "taxable_income": "1200000",
+    "total_tax": "96000.00",
+    "year_of_assessment": "2025/26"
+   },
+   "confidence": {
+    "conflict_penalty": "1",
+    "explanation": "1",
+    "interpretation": "1",
+    "ocr": "0.95",
+    "retrieval": "0.9",
+    "score": "0.9"
+   },
+   "conflicts": [],
+   "explanation": {
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "hallucination_flag": false,
+    "lines": [
+     "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+     "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+    ],
+    "rewrite_status": "not_requested",
+    "used_fallback": false
+   },
+   "pii_redacted": 0,
+   "request_id": "req-0001",
+   "review_reasons": [],
+   "rules": {
+    "period_end": "2026-03-31",
+    "period_start": "2025-04-01",
+    "personal_relief": {
+     "amount": "1800000",
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0001"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "tax_bands": {
+     "bands": [
+      {
+       "lower": "0",
+       "order": 1,
+       "rate_percent": "6",
+       "upper": "1000000"
+      },
+      {
+       "lower": "1000000",
+       "order": 2,
+       "rate_percent": "18",
+       "upper": "1500000"
+      },
+      {
+       "lower": "1500000",
+       "order": 3,
+       "rate_percent": "24",
+       "upper": "2000000"
+      },
+      {
+       "lower": "2000000",
+       "order": 4,
+       "rate_percent": "30",
+       "upper": "2500000"
+      },
+      {
+       "lower": "2500000",
+       "order": 5,
+       "rate_percent": "36",
+       "upper": null
+      }
+     ],
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0002"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "year_of_assessment": "2025/26"
+   },
+   "stages_run": [
+    "extract",
+    "normalise",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "deliver"
+   ],
+   "status": "delivered",
+   "verdicts": [
+    {
+     "attempt": 1,
+     "decision": "PASS",
+     "failed_claims": [],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "calculate"
+    }
+   ],
+   "warnings": []
+  },
+  "traces": [
+   {
+    "attempt": 1,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "0.95",
+     "retrieval": "0.9",
+     "score": "0.9"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL6",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL7",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "0.95",
+      "document_id": "doc-payslip-clean",
+      "source": "ocr",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "0.97",
+      "document_id": "doc-payslip-clean",
+      "source": "ocr",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V4",
+     "RULE-INDIVIDUAL_SLABS-V4"
+    ],
+    "rules": {
+     "period_end": "2026-03-31",
+     "period_start": "2025-04-01",
+     "personal_relief": {
+      "amount": "1800000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 2,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 3,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 4,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 5,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "year_of_assessment": "2025/26"
+    },
+    "warnings": [],
+    "year_of_assessment": "2025/26"
+   }
+  ]
+ },
+ "payslip_noisy": {
+  "c3_requests": [
+   {
+    "as_of_date": "2025-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   }
+  ],
+  "result": {
+   "assurance": "mock",
+   "assurance_note": "C4 is mocked: its verdicts are scripted, not a real check.",
+   "attempt": 1,
+   "calc": {
+    "apit_paid": "50000",
+    "employment_income": "3000000",
+    "refund": "0",
+    "steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "tax_payable": "46000.00",
+    "taxable_income": "1200000",
+    "total_tax": "96000.00",
+    "year_of_assessment": "2025/26"
+   },
+   "confidence": {
+    "conflict_penalty": "1",
+    "explanation": "1",
+    "interpretation": "1",
+    "ocr": "0.55",
+    "retrieval": "0.9",
+    "score": "0.55"
+   },
+   "conflicts": [],
+   "explanation": {
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "hallucination_flag": false,
+    "lines": [
+     "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+     "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+    ],
+    "rewrite_status": "not_requested",
+    "used_fallback": false
+   },
+   "pii_redacted": 0,
+   "request_id": "req-0001",
+   "review_reasons": [
+    "C1 confidence 0.55 is below the review threshold 0.7"
+   ],
+   "rules": {
+    "period_end": "2026-03-31",
+    "period_start": "2025-04-01",
+    "personal_relief": {
+     "amount": "1800000",
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0001"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "tax_bands": {
+     "bands": [
+      {
+       "lower": "0",
+       "order": 1,
+       "rate_percent": "6",
+       "upper": "1000000"
+      },
+      {
+       "lower": "1000000",
+       "order": 2,
+       "rate_percent": "18",
+       "upper": "1500000"
+      },
+      {
+       "lower": "1500000",
+       "order": 3,
+       "rate_percent": "24",
+       "upper": "2000000"
+      },
+      {
+       "lower": "2000000",
+       "order": 4,
+       "rate_percent": "30",
+       "upper": "2500000"
+      },
+      {
+       "lower": "2500000",
+       "order": 5,
+       "rate_percent": "36",
+       "upper": null
+      }
+     ],
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0002"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "year_of_assessment": "2025/26"
+   },
+   "stages_run": [
+    "extract",
+    "normalise",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "deliver"
+   ],
+   "status": "needs_review",
+   "verdicts": [
+    {
+     "attempt": 1,
+     "decision": "PASS",
+     "failed_claims": [],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "calculate"
+    }
+   ],
+   "warnings": []
+  },
+  "traces": [
+   {
+    "attempt": 1,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "0.55",
+     "retrieval": "0.9",
+     "score": "0.55"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL6",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL7",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "0.62",
+      "document_id": "doc-payslip-noisy",
+      "source": "ocr",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "0.55",
+      "document_id": "doc-payslip-noisy",
+      "source": "ocr",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V4",
+     "RULE-INDIVIDUAL_SLABS-V4"
+    ],
+    "rules": {
+     "period_end": "2026-03-31",
+     "period_start": "2025-04-01",
+     "personal_relief": {
+      "amount": "1800000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 2,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 3,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 4,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 5,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "year_of_assessment": "2025/26"
+    },
+    "warnings": [],
+    "year_of_assessment": "2025/26"
+   }
+  ]
+ },
+ "regenerate_then_pass": {
+  "c3_requests": [
+   {
+    "as_of_date": "2025-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   },
+   {
+    "as_of_date": "2025-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   }
+  ],
+  "result": {
+   "assurance": "mock",
+   "assurance_note": "C4 is mocked: its verdicts are scripted, not a real check.",
+   "attempt": 2,
+   "calc": {
+    "apit_paid": "50000",
+    "employment_income": "3000000",
+    "refund": "0",
+    "steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "tax_payable": "46000.00",
+    "taxable_income": "1200000",
+    "total_tax": "96000.00",
+    "year_of_assessment": "2025/26"
+   },
+   "confidence": {
+    "conflict_penalty": "1",
+    "explanation": "1",
+    "interpretation": "1",
+    "ocr": "1",
+    "retrieval": "0.9",
+    "score": "0.9"
+   },
+   "conflicts": [],
+   "explanation": {
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "hallucination_flag": false,
+    "lines": [
+     "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+     "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+    ],
+    "rewrite_status": "not_requested",
+    "used_fallback": false
+   },
+   "pii_redacted": 0,
+   "request_id": "req-0001",
+   "review_reasons": [],
+   "rules": {
+    "period_end": "2026-03-31",
+    "period_start": "2025-04-01",
+    "personal_relief": {
+     "amount": "1800000",
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0001"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "tax_bands": {
+     "bands": [
+      {
+       "lower": "0",
+       "order": 1,
+       "rate_percent": "6",
+       "upper": "1000000"
+      },
+      {
+       "lower": "1000000",
+       "order": 2,
+       "rate_percent": "18",
+       "upper": "1500000"
+      },
+      {
+       "lower": "1500000",
+       "order": 3,
+       "rate_percent": "24",
+       "upper": "2000000"
+      },
+      {
+       "lower": "2000000",
+       "order": 4,
+       "rate_percent": "30",
+       "upper": "2500000"
+      },
+      {
+       "lower": "2500000",
+       "order": 5,
+       "rate_percent": "36",
+       "upper": null
+      }
+     ],
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0002"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "year_of_assessment": "2025/26"
+   },
+   "stages_run": [
+    "extract",
+    "normalise",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "regenerate",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "deliver"
+   ],
+   "status": "delivered",
+   "verdicts": [
+    {
+     "attempt": 1,
+     "decision": "REGENERATE",
+     "failed_claims": [
+      {
+       "reason": "wrong band rate",
+       "step_id": "S3_BAND_2"
+      }
+     ],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "retrieve"
+    },
+    {
+     "attempt": 2,
+     "decision": "PASS",
+     "failed_claims": [],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "calculate"
+    }
+   ],
+   "warnings": []
+  },
+  "traces": [
+   {
+    "attempt": 1,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "1",
+     "retrieval": "0.9",
+     "score": "0.9"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL6",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL7",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V4",
+     "RULE-INDIVIDUAL_SLABS-V4"
+    ],
+    "rules": {
+     "period_end": "2026-03-31",
+     "period_start": "2025-04-01",
+     "personal_relief": {
+      "amount": "1800000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 2,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 3,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 4,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 5,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "year_of_assessment": "2025/26"
+    },
+    "warnings": [],
+    "year_of_assessment": "2025/26"
+   },
+   {
+    "attempt": 2,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "1",
+     "retrieval": "0.9",
+     "score": "0.9"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL6",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL7",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V4",
+     "RULE-INDIVIDUAL_SLABS-V4"
+    ],
+    "rules": {
+     "period_end": "2026-03-31",
+     "period_start": "2025-04-01",
+     "personal_relief": {
+      "amount": "1800000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 2,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 3,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 4,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 5,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "year_of_assessment": "2025/26"
+    },
+    "warnings": [],
+    "year_of_assessment": "2025/26"
+   }
+  ]
+ },
+ "typed": {
+  "c3_requests": [
+   {
+    "as_of_date": "2025-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   }
+  ],
+  "result": {
+   "assurance": "mock",
+   "assurance_note": "C4 is mocked: its verdicts are scripted, not a real check.",
+   "attempt": 1,
+   "calc": {
+    "apit_paid": "50000",
+    "employment_income": "3000000",
+    "refund": "0",
+    "steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "tax_payable": "46000.00",
+    "taxable_income": "1200000",
+    "total_tax": "96000.00",
+    "year_of_assessment": "2025/26"
+   },
+   "confidence": {
+    "conflict_penalty": "1",
+    "explanation": "1",
+    "interpretation": "1",
+    "ocr": "1",
+    "retrieval": "0.9",
+    "score": "0.9"
+   },
+   "conflicts": [],
+   "explanation": {
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "hallucination_flag": false,
+    "lines": [
+     "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+     "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+     "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+    ],
+    "rewrite_status": "not_requested",
+    "used_fallback": false
+   },
+   "pii_redacted": 0,
+   "request_id": "req-0001",
+   "review_reasons": [],
+   "rules": {
+    "period_end": "2026-03-31",
+    "period_start": "2025-04-01",
+    "personal_relief": {
+     "amount": "1800000",
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0001"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-PERSONAL_RELIEF-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "tax_bands": {
+     "bands": [
+      {
+       "lower": "0",
+       "order": 1,
+       "rate_percent": "6",
+       "upper": "1000000"
+      },
+      {
+       "lower": "1000000",
+       "order": 2,
+       "rate_percent": "18",
+       "upper": "1500000"
+      },
+      {
+       "lower": "1500000",
+       "order": 3,
+       "rate_percent": "24",
+       "upper": "2000000"
+      },
+      {
+       "lower": "2000000",
+       "order": 4,
+       "rate_percent": "30",
+       "upper": "2500000"
+      },
+      {
+       "lower": "2500000",
+       "order": 5,
+       "rate_percent": "36",
+       "upper": null
+      }
+     ],
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-2-2025-0002"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+      "valid_from": "2025-04-01",
+      "valid_to": null
+     }
+    },
+    "year_of_assessment": "2025/26"
+   },
+   "stages_run": [
+    "extract",
+    "normalise",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "deliver"
+   ],
+   "status": "delivered",
+   "verdicts": [
+    {
+     "attempt": 1,
+     "decision": "PASS",
+     "failed_claims": [],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "calculate"
+    }
+   ],
+   "warnings": []
+  },
+  "traces": [
+   {
+    "attempt": 1,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1800000"
+      },
+      "operation": "personal_relief",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1800000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 1000000",
+      "inputs": {
+       "amount_in_band": "1000000",
+       "band_lower": "0",
+       "band_upper": "1000000",
+       "rate_percent": "6",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "200000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1200000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "36000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "60000.00",
+       "band_2_tax": "36000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "96000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "96000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "46000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V4"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V4"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL6",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL7",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "1",
+     "retrieval": "0.9",
+     "score": "0.9"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V4"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V4"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL6",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL7",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 36,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 96,000.00 [Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 46,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V4",
+     "RULE-INDIVIDUAL_SLABS-V4"
+    ],
+    "rules": {
+     "period_end": "2026-03-31",
+     "period_start": "2025-04-01",
+     "personal_relief": {
+      "amount": "1800000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.5, inserting item (v) in Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,800,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 2,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 3,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 4,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 5,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 2 of 2025 [C1 MOCK], s.3(1)(b), inserting First Schedule para 1(1D) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 1,000,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-2-2025-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V4",
+       "valid_from": "2025-04-01",
+       "valid_to": null
+      }
+     },
+     "year_of_assessment": "2025/26"
+    },
+    "warnings": [],
+    "year_of_assessment": "2025/26"
+   }
+  ]
+ },
+ "typed_2024_25": {
+  "c3_requests": [
+   {
+    "as_of_date": "2024-04-01",
+    "caller": "c1-orchestrator",
+    "include_history": false,
+    "income_types": [
+     "employment"
+    ],
+    "query_text": "Personal relief and income tax rates for a resident individual's employment income",
+    "request_id": "req-0001",
+    "rule_ids": null,
+    "rule_types": [
+     "relief",
+     "tax_slab"
+    ],
+    "schema_version": "1.0.0",
+    "taxpayer_category": "resident_individual",
+    "top_k": 5
+   }
+  ],
+  "result": {
+   "assurance": "mock",
+   "assurance_note": "C4 is mocked: its verdicts are scripted, not a real check.",
+   "attempt": 1,
+   "calc": {
+    "apit_paid": "50000",
+    "employment_income": "3000000",
+    "refund": "0",
+    "steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1200000"
+      },
+      "operation": "personal_relief",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1200000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 500000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "0",
+       "band_upper": "500000",
+       "rate_percent": "6",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "30000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 12% on taxable income from 500000 to 1000000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "500000",
+       "band_upper": "1000000",
+       "rate_percent": "12",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "90000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_3"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 24% on taxable income from 1500000 to 2000000",
+      "inputs": {
+       "amount_in_band": "300000",
+       "band_lower": "1500000",
+       "band_upper": "2000000",
+       "rate_percent": "24",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "72000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_4"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "30000.00",
+       "band_2_tax": "60000.00",
+       "band_3_tax": "90000.00",
+       "band_4_tax": "72000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "252000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "252000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "202000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "tax_payable": "202000.00",
+    "taxable_income": "1800000",
+    "total_tax": "252000.00",
+    "year_of_assessment": "2024/25"
+   },
+   "confidence": {
+    "conflict_penalty": "1",
+    "explanation": "1",
+    "interpretation": "1",
+    "ocr": "1",
+    "retrieval": "0.9",
+    "score": "0.9"
+   },
+   "conflicts": [],
+   "explanation": {
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 500000: Rs. 30,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 12% on taxable income from 500000 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S3_BAND_3",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 90,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL6",
+      "step_id": "S3_BAND_4",
+      "text": "Tax at 24% on taxable income from 1500000 to 2000000: Rs. 72,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL7",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 252,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL8",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL9",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 202,000.00"
+     }
+    ],
+    "hallucination_flag": false,
+    "lines": [
+     "Personal relief for a resident individual: Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Taxable income: employment income less personal relief (not below zero): Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+     "Tax at 6% on taxable income from 0 to 500000: Rs. 30,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+     "Tax at 12% on taxable income from 500000 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+     "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 90,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+     "Tax at 24% on taxable income from 1500000 to 2000000: Rs. 72,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+     "Total income tax: sum of the tax in each band: Rs. 252,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+     "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+     "Tax still payable: total tax less APIT credit: Rs. 202,000.00"
+    ],
+    "rewrite_status": "not_requested",
+    "used_fallback": false
+   },
+   "pii_redacted": 0,
+   "request_id": "req-0001",
+   "review_reasons": [],
+   "rules": {
+    "period_end": "2025-03-31",
+    "period_start": "2024-04-01",
+    "personal_relief": {
+     "amount": "1200000",
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,200,000 ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-45-2022-0001"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-PERSONAL_RELIEF-V3",
+      "valid_from": "2023-01-01",
+      "valid_to": "2025-03-31"
+     }
+    },
+    "tax_bands": {
+     "bands": [
+      {
+       "lower": "0",
+       "order": 1,
+       "rate_percent": "6",
+       "upper": "500000"
+      },
+      {
+       "lower": "500000",
+       "order": 2,
+       "rate_percent": "12",
+       "upper": "1000000"
+      },
+      {
+       "lower": "1000000",
+       "order": 3,
+       "rate_percent": "18",
+       "upper": "1500000"
+      },
+      {
+       "lower": "1500000",
+       "order": 4,
+       "rate_percent": "24",
+       "upper": "2000000"
+      },
+      {
+       "lower": "2000000",
+       "order": 5,
+       "rate_percent": "30",
+       "upper": "2500000"
+      },
+      {
+       "lower": "2500000",
+       "order": 6,
+       "rate_percent": "36",
+       "upper": null
+      }
+     ],
+     "ref": {
+      "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017",
+      "evidence": "[MOCK verbatim text] ... on the first Rs. 500,000 ... at 6 per cent ...",
+      "evidence_chunk_ids": [
+       "CHUNK-IRA-AMEND-45-2022-0002"
+      ],
+      "origin": "c3",
+      "rule_id": "RULE-INDIVIDUAL_SLABS-V3",
+      "valid_from": "2023-01-01",
+      "valid_to": "2025-03-31"
+     }
+    },
+    "year_of_assessment": "2024/25"
+   },
+   "stages_run": [
+    "extract",
+    "normalise",
+    "retrieve",
+    "calculate",
+    "explain",
+    "score",
+    "assure",
+    "deliver"
+   ],
+   "status": "delivered",
+   "verdicts": [
+    {
+     "attempt": 1,
+     "decision": "PASS",
+     "failed_claims": [],
+     "reasons": [],
+     "request_id": "req-0001",
+     "rerun_from": "calculate"
+    }
+   ],
+   "warnings": []
+  },
+  "traces": [
+   {
+    "attempt": 1,
+    "calc_steps": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "confidence": "1",
+      "description": "Personal relief for a resident individual",
+      "inputs": {
+       "personal_relief": "1200000"
+      },
+      "operation": "personal_relief",
+      "result": "1200000",
+      "source": "engine",
+      "step_id": "S1_RELIEF"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "confidence": "1",
+      "description": "Taxable income: employment income less personal relief (not below zero)",
+      "inputs": {
+       "employment_income": "3000000",
+       "personal_relief": "1200000"
+      },
+      "operation": "max(0, employment_income - personal_relief)",
+      "result": "1800000",
+      "source": "engine",
+      "step_id": "S2_TAXABLE_INCOME"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 6% on taxable income from 0 to 500000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "0",
+       "band_upper": "500000",
+       "rate_percent": "6",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "30000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_1"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 12% on taxable income from 500000 to 1000000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "500000",
+       "band_upper": "1000000",
+       "rate_percent": "12",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "60000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_2"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 18% on taxable income from 1000000 to 1500000",
+      "inputs": {
+       "amount_in_band": "500000",
+       "band_lower": "1000000",
+       "band_upper": "1500000",
+       "rate_percent": "18",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "90000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_3"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Tax at 24% on taxable income from 1500000 to 2000000",
+      "inputs": {
+       "amount_in_band": "300000",
+       "band_lower": "1500000",
+       "band_upper": "2000000",
+       "rate_percent": "24",
+       "taxable_income": "1800000"
+      },
+      "operation": "round_half_up(amount_in_band * rate_percent / 100, 0.01)",
+      "result": "72000.00",
+      "source": "engine",
+      "step_id": "S3_BAND_4"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "confidence": "1",
+      "description": "Total income tax: sum of the tax in each band",
+      "inputs": {
+       "band_1_tax": "30000.00",
+       "band_2_tax": "60000.00",
+       "band_3_tax": "90000.00",
+       "band_4_tax": "72000.00"
+      },
+      "operation": "sum(band taxes)",
+      "result": "252000.00",
+      "source": "engine",
+      "step_id": "S4_TOTAL_TAX"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "APIT already deducted by the employer, credited against the tax",
+      "inputs": {
+       "apit_paid": "50000"
+      },
+      "operation": "apit_paid",
+      "result": "50000",
+      "source": "engine",
+      "step_id": "S5_APIT_CREDIT"
+     },
+     {
+      "citation_refs": [],
+      "confidence": "1",
+      "description": "Tax still payable: total tax less APIT credit",
+      "inputs": {
+       "apit_paid": "50000",
+       "total_tax": "252000.00"
+      },
+      "operation": "total_tax - apit_paid",
+      "result": "202000.00",
+      "source": "engine",
+      "step_id": "S6_PAYABLE"
+     }
+    ],
+    "claims": [
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "claim_id": "CL1",
+      "step_id": "S1_RELIEF",
+      "text": "Personal relief for a resident individual: Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-PERSONAL_RELIEF-V3"
+      ],
+      "claim_id": "CL2",
+      "step_id": "S2_TAXABLE_INCOME",
+      "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL3",
+      "step_id": "S3_BAND_1",
+      "text": "Tax at 6% on taxable income from 0 to 500000: Rs. 30,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL4",
+      "step_id": "S3_BAND_2",
+      "text": "Tax at 12% on taxable income from 500000 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL5",
+      "step_id": "S3_BAND_3",
+      "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 90,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL6",
+      "step_id": "S3_BAND_4",
+      "text": "Tax at 24% on taxable income from 1500000 to 2000000: Rs. 72,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [
+       "RULE-INDIVIDUAL_SLABS-V3"
+      ],
+      "claim_id": "CL7",
+      "step_id": "S4_TOTAL_TAX",
+      "text": "Total income tax: sum of the tax in each band: Rs. 252,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL8",
+      "step_id": "S5_APIT_CREDIT",
+      "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+     },
+     {
+      "citation_refs": [],
+      "claim_id": "CL9",
+      "step_id": "S6_PAYABLE",
+      "text": "Tax still payable: total tax less APIT credit: Rs. 202,000.00"
+     }
+    ],
+    "confidence": {
+     "conflict_penalty": "1",
+     "explanation": "1",
+     "interpretation": "1",
+     "ocr": "1",
+     "retrieval": "0.9",
+     "score": "0.9"
+    },
+    "conflicts": [],
+    "explanation": {
+     "claims": [
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V3"
+       ],
+       "claim_id": "CL1",
+       "step_id": "S1_RELIEF",
+       "text": "Personal relief for a resident individual: Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-PERSONAL_RELIEF-V3"
+       ],
+       "claim_id": "CL2",
+       "step_id": "S2_TAXABLE_INCOME",
+       "text": "Taxable income: employment income less personal relief (not below zero): Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V3"
+       ],
+       "claim_id": "CL3",
+       "step_id": "S3_BAND_1",
+       "text": "Tax at 6% on taxable income from 0 to 500000: Rs. 30,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V3"
+       ],
+       "claim_id": "CL4",
+       "step_id": "S3_BAND_2",
+       "text": "Tax at 12% on taxable income from 500000 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V3"
+       ],
+       "claim_id": "CL5",
+       "step_id": "S3_BAND_3",
+       "text": "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 90,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V3"
+       ],
+       "claim_id": "CL6",
+       "step_id": "S3_BAND_4",
+       "text": "Tax at 24% on taxable income from 1500000 to 2000000: Rs. 72,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [
+        "RULE-INDIVIDUAL_SLABS-V3"
+       ],
+       "claim_id": "CL7",
+       "step_id": "S4_TOTAL_TAX",
+       "text": "Total income tax: sum of the tax in each band: Rs. 252,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL8",
+       "step_id": "S5_APIT_CREDIT",
+       "text": "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00"
+      },
+      {
+       "citation_refs": [],
+       "claim_id": "CL9",
+       "step_id": "S6_PAYABLE",
+       "text": "Tax still payable: total tax less APIT credit: Rs. 202,000.00"
+      }
+     ],
+     "hallucination_flag": false,
+     "lines": [
+      "Personal relief for a resident individual: Rs. 1,200,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Taxable income: employment income less personal relief (not below zero): Rs. 1,800,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017]",
+      "Tax at 6% on taxable income from 0 to 500000: Rs. 30,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+      "Tax at 12% on taxable income from 500000 to 1000000: Rs. 60,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+      "Tax at 18% on taxable income from 1000000 to 1500000: Rs. 90,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+      "Tax at 24% on taxable income from 1500000 to 2000000: Rs. 72,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+      "Total income tax: sum of the tax in each band: Rs. 252,000.00 [Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017]",
+      "APIT already deducted by the employer, credited against the tax: Rs. 50,000.00",
+      "Tax still payable: total tax less APIT credit: Rs. 202,000.00"
+     ],
+     "rewrite_status": "not_requested",
+     "used_fallback": false
+    },
+    "llm_calls": [],
+    "profile": {
+     "apit_paid": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "50000"
+     },
+     "employment_income": {
+      "confidence": "1",
+      "document_id": null,
+      "source": "user",
+      "value": "3000000"
+     }
+    },
+    "request_id": "req-0001",
+    "retrieval_rule_ids": [
+     "RULE-PERSONAL_RELIEF-V3",
+     "RULE-INDIVIDUAL_SLABS-V3"
+    ],
+    "rules": {
+     "period_end": "2025-03-31",
+     "period_start": "2024-04-01",
+     "personal_relief": {
+      "amount": "1200000",
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.36(2)(a), amending Fifth Schedule para 2(a) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... personal relief of Rs. 1,200,000 ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-45-2022-0001"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-PERSONAL_RELIEF-V3",
+       "valid_from": "2023-01-01",
+       "valid_to": "2025-03-31"
+      }
+     },
+     "tax_bands": {
+      "bands": [
+       {
+        "lower": "0",
+        "order": 1,
+        "rate_percent": "6",
+        "upper": "500000"
+       },
+       {
+        "lower": "500000",
+        "order": 2,
+        "rate_percent": "12",
+        "upper": "1000000"
+       },
+       {
+        "lower": "1000000",
+        "order": 3,
+        "rate_percent": "18",
+        "upper": "1500000"
+       },
+       {
+        "lower": "1500000",
+        "order": 4,
+        "rate_percent": "24",
+        "upper": "2000000"
+       },
+       {
+        "lower": "2000000",
+        "order": 5,
+        "rate_percent": "30",
+        "upper": "2500000"
+       },
+       {
+        "lower": "2500000",
+        "order": 6,
+        "rate_percent": "36",
+        "upper": null
+       }
+      ],
+      "ref": {
+       "citation": "Inland Revenue (Amendment) Act No. 45 of 2022 [C1 MOCK], s.33(1), inserting First Schedule para 1(1B)(b) and 1(1C) of Act No. 24 of 2017",
+       "evidence": "[MOCK verbatim text] ... on the first Rs. 500,000 ... at 6 per cent ...",
+       "evidence_chunk_ids": [
+        "CHUNK-IRA-AMEND-45-2022-0002"
+       ],
+       "origin": "c3",
+       "rule_id": "RULE-INDIVIDUAL_SLABS-V3",
+       "valid_from": "2023-01-01",
+       "valid_to": "2025-03-31"
+      }
+     },
+     "year_of_assessment": "2024/25"
+    },
+    "warnings": [],
+    "year_of_assessment": "2024/25"
+   }
+  ]
+ }
+}
