@@ -27,5 +27,15 @@ N01,What is the VAT rate on goods?,2025-06-01,none,VAT is a different Act (not i
 N02,What is the customs duty on imported cars?,2025-06-01,none,customs is not income tax
 N03,What is the penalty for filing a tax return late?,2025-06-01,none,in the Act but not a modelled rule
 N04,What is the income tax rate for companies?,2025-06-01,none,company rates are not the individual bands
-N05,What relief does a senior citizen get on interest income?,2025-06-01,none,Fifth Schedule para 2(d): a different relief from personal relief (not modelled)
+N05,What relief does a senior citizen get on interest income?,2025-06-01,none,Fifth Schedule para 2(d) senior citizen relief ended on 31 December 2019: nothing in force in 2025
 N06,How do I register a vehicle?,2025-06-01,none,unrelated question
+R01,Can I claim a relief for solar panels on my house?,2025-06-01,solar_panel_relief,para 2(g) V1 period
+R02,Solar panel relief on 1 April 2021,2021-04-01,solar_panel_relief,first day of para 2(g) (Table A operation date)
+R03,Is there a tax relief for rent I receive from my house?,2024-06-01,rental_relief,para 2(c) V1 period
+R04,Can I deduct medical insurance and school fees in 2021?,2021-06-01,qualifying_expenditure_relief,para 2(f) V1 period
+R05,Expenditure relief for housing loan interest on 31 December 2022,2022-12-31,qualifying_expenditure_relief,last day of para 2(f) (split year annualised)
+R06,Senior citizen relief on interest income in 2019,2019-06-01,senior_citizen_interest_relief,para 2(d) V1 period (ended 2019)
+R07,Employment relief for my salary in 2018,2018-10-01,employment_relief,para 2(b) V1 period
+R08,Relief for foreign currency income from freelance services in 2019,2019-06-01,foreign_currency_service_relief,para 2(e) V1 period
+N07,Solar panel relief in June 2020,2020-06-01,none,para 2(g) starts on 1 April 2021: not yet in force
+N08,Can I claim expenditure relief for medical bills in 2024?,2024-06-01,none,para 2(f) ended on 31 December 2022: no longer in force

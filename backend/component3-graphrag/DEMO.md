@@ -72,3 +72,43 @@ python -m knowledge_graph.update DOC-IRA-AMEND-11-2026
 - Evaluation: `python -m evaluation.retrieval` (flat RAG vs GraphRAG)
 
 After the demo the graph holds every Act again (the two updates added the rest).
+
+## 5. Not only personal relief: every relief, and a document that triggers one
+
+The same versioning covers every relief in Fifth Schedule paragraph 2 (general relief engine).
+
+```bash
+python -m knowledge_graph.versions        # 14/14 versions exact, including the six other reliefs
+python -m retrieval_api.graph_backend "Can I claim relief for solar panels?" --date 2025-06-01
+python -m retrieval_api.graph_backend "solar panel relief" --date 2020-06-01 --history
+python -m retrieval_api.graph_backend "What reliefs can I claim?" --date 2021-06-01
+```
+- 2025: up to Rs. 600,000, limited to the panels' cost, with who can claim it and the citation
+  (Act No. 10 of 2021, s.55(2), adding Fifth Schedule para 2(g)).
+- 2020: no result, `NO_RULE_IN_FORCE_ON_DATE`; with `--history` it shows the relief starts on
+  2021-04-01 (Table A of Act No. 10 of 2021).
+- 2021: personal relief, expenditure relief (health, education, housing loan ...), rent relief
+  and solar relief are all in force; in 2024 the expenditure relief is gone (ended 2022-12-31).
+
+Neo4j Browser, all reliefs and their versions:
+```cypher
+MATCH (v:RuleVersion)-[:VERSION_OF]->(r:Rule {rule_type:'relief'})
+RETURN r.title AS relief, v.rule_id, v.valid_from, v.valid_to, v.status, v.amount, v.cap,
+       v.rate_percent ORDER BY relief, v.valid_from
+```
+
+## 6. Keeping up with new law: automatic, with safety checks
+
+The safety checks, run on the real Act's link:
+```bash
+python -m knowledge_graph.auto_update https://www.ird.gov.lk/en/publications/Acts_Income%20Tax_2017/IR_Act_No_02-2025_E.pdf
+```
+On the full corpus it stops at check 3 ("already in the corpus"), which shows a duplicate is
+never added twice. Every check is also tested on the real Acts (tests/test_auto_update.py:
+a corpus without Act No. 2 of 2025 -> added; the 2017 Act or a web page -> held, nothing
+changed; Neo4j down -> held, everything put back).
+
+The change record (after step 2 above): `curl http://localhost:8003/notifications`.
+
+Honest framing: the check runs once a month, not in real time; a document that fails a check
+waits for the maintainer (`python -m data_collection.monitor --list`).
