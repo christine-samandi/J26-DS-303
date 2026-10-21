@@ -11,6 +11,7 @@ Why this module exists:
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence
 
@@ -22,6 +23,13 @@ MONTHS = {m: i for i, m in enumerate(
 PERSONAL_FIELD = re.compile(r"^\W*(?:(name|nic|number|no|employee|emp|department|designation|address|"
                             r"account|date|period|month)\b|නම|අංකය|ජා\.?\s*හැ|ලිපිනය|දෙපාර්තමේන්තුව)", re.I)
 MIN_ISSUER_GUESS_CONF = 0.6   # first-line issuer guess needs a clearly read line
+# Document titles ('Pay Slip For The Month Of June 2026') and column headings ('LKR', 'BRANCH/DEPARTMENT')
+# are never the employer: both were returned as the issuer on real slips (PS_005, PS_007, PS_008).
+NOT_ISSUER = re.compile(r"pay\s*slip|salary\s*slip|for\s+the\s+month|statement|branch|department|"
+                        r"allowance|salary|deduction|recovery|loan|earnings|contribution|"
+                        r"^\W*(?:lkr|rs|ler|usd|amount|description)\W*$", re.I)
+MIN_ISSUER_LETTERS = 4
+GUESS_LINES = 3
 ISSUER_HINTS = re.compile(r"\b(pvt|ltd|limited|plc|company|co\.|bank|holdings|corporation|\(pvt\))", re.I)
 
 
@@ -82,7 +90,33 @@ def group_lines(tokens: Sequence) -> List[Line]:
                 break
         else:
             lines.append([t])
-    return [Line(sorted(ln, key=lambda t: t.bbox[0])) for ln in lines]
+    out: List[Line] = []
+    for ln in lines:
+        out.extend(Line(sorted(part, key=lambda t: t.bbox[0])) for part in _split_rows(ln))
+    return out
+
+
+def _split_rows(toks: list) -> List[list]:
+    """Two printed rows grouped as one line: on a photo where the amount column sits half a row lower,
+    'Paye Tax' and 'Total Deductions' (or two amounts) chain into one line through the in-between
+    tokens. They are two rows when their tokens form two height bands that OVERLAP horizontally
+    (a merely slanted row has its bands side by side, left part higher than right part)."""
+    if len(toks) < 3:
+        return [toks]
+    hs = sorted(t.bbox[3] for t in toks)
+    h = hs[len(hs) // 2]
+    by_y = sorted(toks, key=lambda t: t.bbox[1] + t.bbox[3] / 2)
+    cys = [t.bbox[1] + t.bbox[3] / 2 for t in by_y]
+    gap, k = max((cys[i + 1] - cys[i], i + 1) for i in range(len(cys) - 1))
+    if gap < 0.6 * h:
+        return [toks]
+    upper, lower = by_y[:k], by_y[k:]
+    ux = (min(t.bbox[0] for t in upper), max(t.bbox[0] + t.bbox[2] for t in upper))
+    lx = (min(t.bbox[0] for t in lower), max(t.bbox[0] + t.bbox[2] for t in lower))
+    overlap = min(ux[1], lx[1]) - max(ux[0], lx[0])
+    if overlap < 0.3 * min(ux[1] - ux[0], lx[1] - lx[0]):
+        return [toks]
+    return _split_rows(upper) + _split_rows(lower)
 
 
 def _is_year(text: str) -> bool:
@@ -111,7 +145,13 @@ def split_amount(line: Line):
 
 
 def _amount_candidate(field_name, label_toks, amount_toks, score) -> Optional[Candidate]:
+    # Two complete amounts on one line ('179,045.79 12,789.50': two rows merged on a tilted photo) are
+    # never one value; joining them invented 1,791,278,904,579.50. Row alignment picks the right one.
+    if sum(bool(re.search(r"\d[.,]\d{2}$", t.text)) for t in amount_toks) >= 2:
+        return None
     raw = " ".join(t.text for t in amount_toks)     # spaces kept: '28 775 29' -> cents rule
+    if not any(ch.isdigit() for ch in raw):
+        return None          # 'oo' is not 0.00: look-alike letters only count next to real digits
     parsed = parse_amount(raw)
     if parsed is None:
         return None
@@ -127,7 +167,23 @@ def _amount_candidate(field_name, label_toks, amount_toks, score) -> Optional[Ca
 def find_pay_period(lines: List[Line]) -> Optional[Candidate]:
     pat = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*[-/,]?\s*((?:19|20)\d\d)\b", re.I)
     num = re.compile(r"\b((?:19|20)\d\d)[-/.](0?[1-9]|1[0-2])\b|\b(0?[1-9]|1[0-2])[-/.]((?:19|20)\d\d)\b")
+    title = re.compile(r"month\s*of\s*([a-z]{3,9}?)\s*((?:19|20)\d\d)", re.I)
+    names = ["january", "february", "march", "april", "may", "june", "july", "august", "september",
+             "october", "november", "december"]
     for ln in lines:
+        # 'Pay Slip For The Month Of July 2026' read as 'Month ofsuly2026': in a title the month may be
+        # glued and misread by one letter, so it is matched fuzzily (and the field confidence lowered)
+        t = title.search(ln.text)
+        if t:
+            word = t.group(1).lower()
+            best = max(names, key=lambda n: SequenceMatcher(None, word, n[:len(word)] if len(word) <= len(n) else n).ratio())
+            if SequenceMatcher(None, word, best[:len(word)]).ratio() >= 0.75:
+                conf = sum(x.confidence for x in ln.tokens) / len(ln.tokens) * (1.0 if best.startswith(word) else 0.8)
+                c = Candidate("pay_period", f"{t.group(2)}-{names.index(best) + 1:02d}", ln.text,
+                              ocr_confidence=round(conf, 4), bbox=union_bbox(ln.tokens))
+                if not best.startswith(word):
+                    c.notes.append(f"month read as '{t.group(1)}', taken as {best.title()}")
+                return c
         m = pat.search(ln.text)
         if m:
             value = f"{m.group(2)}-{MONTHS[m.group(1)[:3].lower()]:02d}"
@@ -149,13 +205,15 @@ def find_issuer(lines: List[Line]) -> Optional[Candidate]:
     # are never the issuer: 'EPF Corporation Contribution 28,775.29' contains 'Corporation' but is a field.
     top = [ln for ln in lines[: max(3, len(lines) // 4)]
            if not split_amount(ln)[1] and not match_field(ln.text) and not PERSONAL_FIELD.match(ln.text)
-           and "\u25cf" not in ln.text]           # a line the PII guard masked ('●') is personal data
+           and "\u25cf" not in ln.text           # a line the PII guard masked ('●') is personal data
+           and not NOT_ISSUER.search(ln.text)
+           and sum(c.isalpha() for c in ln.text) >= MIN_ISSUER_LETTERS]
     for ln in top:
         if ISSUER_HINTS.search(ln.text):
             conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
             return Candidate("issuer", ln.text.strip(" -|"), ln.text, ocr_confidence=round(conf, 4),
                              bbox=union_bbox(ln.tokens))
-    for ln in top:
+    for ln in top[:GUESS_LINES]:      # a guess only from the very top: deeper lines are field labels ('Profit Bonus')
         letters = sum(c.isalpha() for c in ln.text)
         raw_conf = sum(t.confidence for t in ln.tokens) / len(ln.tokens)
         # A guess from a noisy line ('......', table rules, half-masked rows) is worse than no

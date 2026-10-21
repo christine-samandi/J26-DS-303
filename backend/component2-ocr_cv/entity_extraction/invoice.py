@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -66,7 +67,8 @@ INVOICE_LABELS: Dict[str, List[str]] = {
     "tax:SGST": ["sgst"], "tax:CGST": ["cgst"], "tax:IGST": ["igst"], "tax:GST": ["gst"],
     "total_amount": ["total", "grand total", "gross total", "net total", "total amount", "total payable",
                      "total charges for bill", "total charges for bill period", "amount", "the sum of",
-                     "amount received", "donation amount", "මුදල", "පරිත්‍යාග මුදල",
+                     "amount received", "donation amount", "මුදල", "පරිත්‍යාග මුදල", "this month charge",
+                     "total charges for the bill period", "charges for bill period",
                      "total amount consideration including vat", "total with tax", "total estimate",
                      "මුළු මුදල", "එකතුව", "මුළු එකතුව"],
     "amount_paid": ["advance", "amount paid", "paid", "payments", "total payments", "cash", "received",
@@ -97,6 +99,16 @@ MAX_LABEL_WORDS = 9                 # longer runs of words are sentences, not la
 MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
                                       "nov", "dec"], start=1)}
 AMBIGUOUS_DATE_CAP = 0.8
+NUMERIC_FACT = re.compile(r"units|rate|charge|capacity|size|number|amount|kwh|\(rs", re.I)
+PII_LABEL = re.compile(r"mobile|phone|tel\b|contact|account|a/c|nic\b", re.I)
+DATE_LIKE = re.compile(r"^\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}$")
+# Two-column key | value facts kept when no colon is printed. Generic on purpose (solar, utility,
+# charity); anything else in two columns is more often a table header or neighbouring labels.
+KNOWN_FACTS = ["units exported", "export rate", "charge for units exported", "units consumed", "no of units",
+               "system size", "system capacity", "capacity", "number of panels", "panel", "inverter", "tariff",
+               "connection", "bill period", "billing period", "grid connection", "purpose", "valid until",
+               "project type", "roof type", "mounting system", "expected start date", "expected completion",
+               "payment", "premises id", "month"]
 SELLER_HINTS = re.compile(r"\b(foundation|trust|society|sabha|enterprises?|traders|solutions|installations?|"
                           r"engineering|electricals?|hardware|stores)\b", re.I)
 TITLE_WORDS = {"invoice", "tax invoice", "receipt", "quotation", "estimate", "bill", "statement", "donation receipt"}
@@ -178,7 +190,7 @@ def match_label(text: str) -> Optional[Tuple[str, tuple, str]]:
     """Best (field, key, phrase). key = (anchored, score, length): a label that STARTS with the phrase
     beats one that only contains it ('VAT Amount (Total Value of Supply @ VAT Rate)' is VAT)."""
     words = normalise(text).split()
-    if not words or len(words) > MAX_LABEL_WORDS:
+    if not words or len(words) > MAX_LABEL_WORDS or " ".join(words).startswith("amount in words"):
         return None
     best = None
     for f, phrases in INVOICE_LABELS.items():
@@ -229,29 +241,63 @@ def parse_date(text: str, order: Optional[str]) -> Tuple[Optional[date], bool, O
 
 
 # ---------------------------------------------------------------- items table
-def _roles_in(line: Line) -> Dict[str, Tuple[float, float]]:
-    """Column role -> (x centre, left edge) for a header line, or {} if it is not a header."""
-    toks = line.tokens
+NOT_HEADER = {"date", "time", "name", "note", "late", "rent", "unite", "units", "tariff"}   # look like 'rate'/'unit'
+
+
+def _word_is(word: str, name: str) -> bool:
+    """Header word match that tolerates one OCR slip in longer words ('Dise' for 'Disc', 'Qnty')."""
+    if word == name:
+        return True
+    if word in NOT_HEADER:
+        return False
+    return len(name) >= 4 and len(word) >= 3 and SequenceMatcher(None, word, name).ratio() >= 0.75
+
+
+def _roles_in(toks: list) -> Dict[str, Tuple[float, float]]:
+    """Column role -> (x centre, left edge) for header tokens, or {} if they are not a header."""
+    toks = sorted(toks, key=lambda t: t.bbox[0])
     words = [normalise(t.text) for t in toks]
     used, roles = set(), {}
     for size in (2, 1):
         for i in range(len(toks) - size + 1):
             if any(j in used for j in range(i, i + size)):
                 continue
-            phrase = " ".join(words[i:i + size])
+            ws = words[i:i + size]
             for role, names in ROLE_WORDS.items():
-                if role in roles or phrase not in names:
+                if role in roles:
+                    continue
+                hit = any(len(n.split()) == size and all(_word_is(w, nw) for w, nw in zip(ws, n.split()))
+                          for n in names)
+                if not hit:
                     continue
                 span = toks[i:i + size]
                 x0, x1 = span[0].bbox[0], span[-1].bbox[0] + span[-1].bbox[2]
                 roles[role] = ((x0 + x1) / 2, x0)
                 used.update(range(i, i + size))
                 break
-    if "amount" not in roles or len({"desc", "qty", "rate"} & set(roles)) < 1 or len(roles) < 2:
-        return {}
-    if any(looks_numeric(t.text) for t in toks):
+    # A table header names what is sold AND how it is priced: an item/qty/rate column plus the amount
+    # (or two of qty/rate/discount when the 'Amount' heading is unreadable). 'Total with Tax' alone
+    # (total + tax) is a label, not a header.
+    core = {"desc", "qty", "rate"} & set(roles)
+    priced = "amount" in roles or len({"qty", "rate", "dis"} & set(roles)) >= 2
+    if not core or not priced or len(roles) < 3:
         return {}
     return roles
+
+
+def header_at(lines: List[Line], hi: int) -> Dict[str, Tuple[float, float]]:
+    """Header roles from line hi plus its neighbours within one text height: on a tilted photo or a
+    bilingual header ('Item / අයිතමය' on two lines) the header words land on 2-3 'lines'."""
+    ln = lines[hi]
+    if any(looks_numeric(t.text) and not t.text.strip("#").isdigit() for t in ln.tokens):
+        return {}
+    h = sorted(t.bbox[3] for t in ln.tokens)[len(ln.tokens) // 2]
+    toks = list(ln.tokens)
+    for lj in (hi - 1, hi + 1, hi + 2):
+        if 0 <= lj < len(lines) and abs(lines[lj].top - ln.top) <= 1.6 * h \
+                and not any(looks_numeric(t.text) and len(t.text) > 2 for t in lines[lj].tokens):
+            toks += lines[lj].tokens
+    return _roles_in(toks)
 
 
 def _stop_row(line: Line) -> bool:
@@ -265,18 +311,27 @@ def _stop_row(line: Line) -> bool:
 def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
     """Returns (items, consumed line indexes, report)."""
     for hi, ln in enumerate(lines):
-        cols = _roles_in(ln)
+        cols = header_at(lines, hi)
         if cols:
             break
     else:
         return [], set(), {"found": False}
-    consumed, items = {hi}, []
+    if "amount" not in cols:
+        # 'Amount' heading unreadable: the right-most column of numbers is the amount
+        right = max(t.bbox[0] + t.bbox[2] for l in lines for t in l.tokens)
+        last = max(x for x, _ in cols.values())
+        cols["amount"] = ((last + right) / 2 + 0.25 * (right - last), last + 0.5 * (right - last))
+    consumed, items, pending = {hi}, [], []
+    while hi + 1 < len(lines) and not any(_is_num(t) and len(t.text) > 2 for t in lines[hi + 1].tokens) \
+            and lines[hi + 1].top - lines[hi].top <= 1.6 * lines[hi].tokens[0].bbox[3]:
+        hi += 1                                   # second header line (Sinhala names under English)
+        consumed.add(hi)
     num_cols = {r: x for r, (x, _) in cols.items() if r in NUMERIC_ROLES}
     text_cols = {r: x for r, (x, _) in cols.items() if r not in NUMERIC_ROLES}
     desc_left = cols.get("desc", (0, 0))[1]
     # numbers left of the first numeric column belong to the description ('Solar PV Panel 550W', 'Item 1')
     first_num_left = min((x0 for r, (_, x0) in cols.items() if r in NUMERIC_ROLES), default=0)
-    report = {"found": True, "header": ln.text, "columns": sorted(cols, key=lambda r: cols[r][0])}
+    report = {"found": True, "header": lines[min(consumed)].text, "columns": sorted(cols, key=lambda r: cols[r][0])}
     for i in range(hi + 1, len(lines)):
         row = lines[i]
         if _stop_row(row):
@@ -302,27 +357,93 @@ def parse_table(lines: List[Line]) -> Tuple[List[dict], set, dict]:
                 every = {**num_cols, **text_cols}
                 nearest = min(every, key=lambda r: abs(every[r] - cx)) if every else "desc"
                 (unit if nearest == "unit" else desc).append(t)
+        cy = (row.top + row.bottom) / 2
         if not cells:
-            if desc and items:                              # wrapped description
-                items[-1]["description"] += " " + _text(desc)
-                items[-1]["tokens"] += desc
+            if desc:                                        # wrapped / second-language description line
+                pending.append((cy, desc))
                 consumed.add(i)
             continue
-        item = {"description": _text(desc), "unit": _text(unit) or None, "tokens": toks}
+        amt_toks = cells.get("amount", [])
+        amount_raw = amt_toks[0].text.strip("[]|") if len(amt_toks) == 1 else ""
+        item = {"parts": [(cy, desc)] if desc else [], "unit": _text(unit) or None, "tokens": toks, "cy": cy,
+                "no_separator": len(amount_raw) >= 5 and amount_raw.isdigit()}
         for role, ts in cells.items():
-            raw = " ".join(t.text for t in ts)
+            raw = " ".join(t.text.strip("[]|") for t in ts)
             pm = PERCENT.search(raw)
             if role == "tax":
                 item["tax_rate"] = float(pm[1]) / 100 if pm else None
+                continue
+            if role == "dis" and pm:
+                item["discount"] = float(pm[1])          # percent; check_item tries % and amount
+                item["discount_is_pct"] = True
                 continue
             p = parse_amount(raw)
             key = {"qty": "quantity", "rate": "unit_price", "dis": "discount", "amount": "amount"}[role]
             item[key] = p.value if p else None
             item["cleaned"] = item.get("cleaned", False) or bool(p and p.corrected)
+        if all(item.get(k) is None for k in ("quantity", "unit_price", "amount")):
+            if desc:                                        # a second header/description line, not an item
+                pending.append((cy, desc))
+            consumed.add(i)
+            continue
         items.append(item)
         consumed.add(i)
+    # A description line without numbers belongs to the NEAREST row, not always the one above: on a
+    # tilted photo, or when the row's numbers are centred between an English and a Sinhala line, the
+    # wrapped text sits closer to the next row's numbers.
+    for cy, desc in pending:
+        if items and not _header_word(_text(desc)):
+            it = min(items, key=lambda x: abs(x["cy"] - cy))
+            it["parts"].append((cy, desc))
+            it["tokens"] = it["tokens"] + desc
+    for it in items:
+        it["description"] = " ".join(_text(d) for _, d in sorted(it.pop("parts"), key=lambda p: p[0]))
     report["rows"] = len(items)
     return items, consumed, report
+
+
+# ---------------------------------------------------------------- value below a label
+BELOW_LINES = 3          # bilingual labels: English, then Sinhala and Tamil lines; the value sits beside one of them
+MONEY_CENTS = re.compile(r"\d\.\d{2}\)?$")
+
+
+def best_money(tokens: list) -> list:
+    """Drop noise AFTER a complete money value ('792,090.00 2,' -> '792,090.00'). Tokens before it
+    stay: OCR splits one amount into pieces ('166 90.00', '150, 000.00')."""
+    for i, t in enumerate(tokens):
+        if MONEY_CENTS.search(t.text.strip("[]|")):
+            return tokens[:i + 1]
+    return tokens
+
+
+def value_below(lines: List[Line], li: int, label: list, skip: set) -> Tuple[list, Optional[int]]:
+    """A label with no value on its own line. Two layouts are common on Sri Lankan bills:
+    - header box: 'Previous Due | Payments | Total Due' with the values on the row BELOW, each under
+      its label -> a number whose centre lies under the label;
+    - trilingual cell: English / Sinhala / Tamil label lines with ONE value beside the middle line ->
+      a number to the right of the label on one of the next lines.
+    The search stops at the next line that has its own English label with its own value."""
+    x0 = label[0].bbox[0]
+    x1 = label[-1].bbox[0] + label[-1].bbox[2]
+    width = max(x1 - x0, 40)
+    for lj in range(li + 1, min(li + 1 + BELOW_LINES, len(lines))):
+        if lj in skip:
+            break
+        segs = segments(lines[lj])
+        under = [t for s in segs for t in s if _is_num(t) and not PERCENT.fullmatch(t.text.strip())
+                 and (len(re.sub(r"\D", "", t.text)) >= 3 or MONEY_CENTS.search(t.text))
+                 and x0 - 0.3 * width <= t.bbox[0] + t.bbox[2] / 2 <= x1 + 0.3 * width]
+        if under:
+            return best_money(under), lj
+        right = [s for s in segs if _numeric_seg(s) and s[0].bbox[0] > x1
+                 and len(re.sub(r"\D", "", _text(s))) >= 3
+                 and not all(PERCENT.fullmatch(t.text.strip()) for t in s)]
+        own_label = any(head(s)[0] and match_label(_text(head(s)[0])) and s[0].bbox[0] < x1 for s in segs)
+        if right and not own_label:
+            return best_money(right[0]), lj
+        if own_label:
+            break
+    return [], None
 
 
 # ---------------------------------------------------------------- fields and attributes
@@ -361,6 +482,7 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
                         break
                     j += 1
             if f in AMOUNT_FIELDS or f in TAX_HELPERS:
+                same_line = True
                 if rest:
                     _, amt = split_amount(Line([t for t in seg if not PERCENT.fullmatch(t.text.strip())]))
                 else:
@@ -368,29 +490,39 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
                     amt = segs[nums[-1]] if nums else []
                     amt = [t for t in amt if not PERCENT.fullmatch(t.text.strip())]
                 if not amt:
+                    amt, _ = value_below(lines, li, label or seg, skip)
+                    same_line = False
+                if not amt:
                     continue
-                p = parse_amount(" ".join(t.text for t in amt))
+                amt = best_money(amt)
+                p = parse_amount(" ".join(t.text.strip("[]|") for t in amt))
                 if p is None:
                     continue
                 pm = PERCENT.search(ln.text)
                 single = len([j for j in nxt if _numeric_seg(segs[j])]) < 2
-                c = Cand(f, p.value, _text(amt), _conf(amt), union_bbox(amt), key[:1] + (single,) + key[1:], li,
+                c = Cand(f, p.value, _text(amt), _conf(amt), union_bbox(amt), key[:1] + (single, same_line) + key[1:], li,
                          cleaned=p.corrected,
                          rate=float(pm[1]) / 100 if pm and f not in ("total_amount", "subtotal") else None)
                 if p.corrected:
                     c.notes.append(f"amount text cleaned: '{c.raw_text}' -> {p.value:,.2f}")
                 if not single:
                     c.notes.append("several numbers on the row (column totals); the last one was read")
+                if not same_line:
+                    c.notes.append("value printed below/beside a multi-line label")
                 offer(c)
             else:
                 val = rest or (segs[nxt[0]] if nxt else [])
+                if f in TEXT_FIELDS and PII_LABEL.search(_text(label)):
+                    continue        # 'Reg. Mobile No' is a phone number, not a registration number
+                if not val and f in DATE_FIELDS:
+                    val, _ = value_below(lines, li, label or seg, skip)
                 if not val:
                     continue
                 if f in DATE_FIELDS:
                     d, amb, other = parse_date(_text(val), order)
                     if d is None:
                         continue
-                    c = Cand(f, d, _text(val), _conf(val), union_bbox(val), key[:1] + (True,) + key[1:], li,
+                    c = Cand(f, d, _text(val), _conf(val), union_bbox(val), key[:1] + (True, True) + key[1:], li,
                              alt=other if amb else None)
                     if amb:
                         c.notes.append(f"day and month both <= 12; read as DD/MM ({d.isoformat()}), "
@@ -399,19 +531,29 @@ def find_fields(lines: List[Line], skip: set, order: Optional[str],
                 elif f == "payment_terms":
                     dm = re.search(r"(\d{1,3})\s*days?", _text(val), re.I)
                     if dm:
-                        offer(Cand(f, int(dm[1]), _text(val), _conf(val), union_bbox(val), key[:1] + (True,) + key[1:], li))
+                        offer(Cand(f, int(dm[1]), _text(val), _conf(val), union_bbox(val), key[:1] + (True, True) + key[1:], li))
                 else:
                     tok = val[0]
                     if not any(ch.isdigit() for ch in tok.text) or "\u25cf" in tok.text:
                         continue
-                    offer(Cand(f, tok.text.strip(":;,"), tok.text, _conf([tok]), list(tok.bbox), key[:1] + (True,) + key[1:], li))
+                    if f == "document_number" and DATE_LIKE.match(tok.text.strip(":;,")):
+                        continue    # a date is never the document number (a neighbouring line's value)
+                    offer(Cand(f, tok.text.strip(":;,"), tok.text, _conf([tok]), list(tok.bbox), key[:1] + (True, True) + key[1:], li))
             used.update([si] + nxt)
             field_lines.append(li)
         # printed key-value facts that are not standard fields ('System Size | 5 kW')
         free = [s for k, s in enumerate(segs) if k not in used]
-        in_header_block = LETTERHEAD_LINES <= li and (table_start is None or li < table_start)
+        # two-column facts without a colon only between the letterhead and an items table; elsewhere
+        # (utility bills, receipts) only the known fact names, so neighbouring labels are not paired
+        in_header_block = table_start is not None and LETTERHEAD_LINES <= li < table_start
         attributes += _attributes(free, pairs_allowed=in_header_block)
     return best, attributes, field_lines
+
+
+def _header_word(text: str) -> bool:
+    words = normalise(text).split()
+    return bool(words) and all(any(_word_is(w, n) for names in ROLE_WORDS.values() for n in names
+                                   if len(n.split()) == 1) for w in words)
 
 
 def _attributes(segs: List[list], pairs_allowed: bool = True) -> List[Attribute]:
@@ -422,17 +564,23 @@ def _attributes(segs: List[list], pairs_allowed: bool = True) -> List[Attribute]
         if ":" in txt and not txt.strip().endswith(":") and not re.match(r"^\d", txt):
             k, v = txt.split(":", 1)
             pairs.append((k, v, s))
-    if not pairs and pairs_allowed and len(segs) >= 2 and len(segs) % 2 == 0:
+    if not pairs and len(segs) >= 2 and len(segs) % 2 == 0:
         for k_seg, v_seg in zip(segs[::2], segs[1::2]):
             kt = _text(k_seg)
-            if any(c.isdigit() for c in kt) or len(kt.split()) > 5:
+            if any(c.isdigit() for c in kt) or len(kt.split()) > 6:
                 return out
-            pairs.append((kt, _text(v_seg), v_seg))
+            known = any(_phrase_score(normalise(kt).split(), p) >= 0.85 for p in KNOWN_FACTS)
+            if pairs_allowed or known:
+                pairs.append((kt, _text(v_seg), v_seg))
     for k, v, s in pairs:
         k, v = k.strip(" :-|"), v.strip(" :-|")
+        if _header_word(k) or _header_word(v):
+            continue
+        if NUMERIC_FACT.search(k) and not re.search(r"\d", v):
+            continue        # 'Charge for Units Consumed | Fixed Charge': two column headings, not a fact
         letters = sum(ch.isalpha() for ch in k)
         if not k or not v or PII_KEY.search(k) or "\u25cf" in v or match_label(k) or match_label(v) \
-                or letters < 3 or letters < 0.5 * len(k.replace(" ", "")) or sum(ch.isalnum() for ch in v) < 2 \
+                or letters < 3 or letters < 0.5 * len(k.replace(" ", "")) or (sum(ch.isalnum() for ch in v) < 2 and not v.strip().isdigit()) \
                 or _conf(s) < MIN_ATTR_CONF:
             continue
         out.append(Attribute(key=k, value=v, confidence=_conf(s), bbox=union_bbox(s)))
@@ -447,7 +595,9 @@ def seller(lines: List[Line]):
     # A company line keeps its masked part ('●●●●●● Broadband Networks (Pvt) Ltd'): the PII guard
     # may hide a brand word that looks like a name; the visible part still identifies the seller type.
     for ln in firsts[: max(6, len(firsts) // 3)]:
-        name = re.sub(r"\(\s*pv\s*\d+\s*\)|\bpv\s*\d+\b", "", ln.text, flags=re.I).strip(" -|,")
+        # keep only the name words: a tilted photo can merge the (masked) address line into this one
+        words = [t.text for t in ln.tokens if "\u25cf" not in t.text and not re.search(r"\d", t.text)]
+        name = re.sub(r"\(\s*pv\s*\)|\bpv\b\s*$|\(\s*$", "", " ".join(words), flags=re.I).strip(" -|,(")
         if (ISSUER_HINTS.search(name) or SELLER_HINTS.search(name)) and not match_label(name):
             from entity_extraction.extractor import Candidate
             return Candidate("issuer", name, ln.text, ocr_confidence=_conf(ln.tokens), bbox=union_bbox(ln.tokens))
@@ -496,10 +646,12 @@ def words_to_number(text: str) -> Optional[float]:
 
 
 def amount_in_words(lines: List[Line]) -> Optional[Tuple[float, str]]:
-    for ln in lines:
+    for k, ln in enumerate(lines):
         n = normalise(ln.text)
         if n.startswith(("amount in words", "rupees", "the sum of rupees", "sum of rupees")):
             words = ln.text.split(":", 1)[1] if ":" in ln.text else ln.text
+            if "only" not in n and k + 1 < len(lines):          # wrapped onto the next line
+                words += " " + _text(segments(lines[k + 1])[0])
             value = words_to_number(re.sub(r"(?i)amount in words", "", words))
             if value:
                 return value, ln.text
@@ -524,7 +676,7 @@ def extract_invoice(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
     issuer = seller(lines)
     if issuer:
         cands["issuer"] = Cand("issuer", issuer.value, issuer.raw_text, issuer.ocr_confidence, issuer.bbox,
-                               (True, True, 1.0, 0), -1, notes=list(issuer.notes))
+                               (True, True, True, 1.0, 0), -1, notes=list(issuer.notes))
 
     # taxes: VAT and SSCL are fields AND components; GST parts are components only
     taxes: Dict[str, Cand] = {}
@@ -597,11 +749,16 @@ def extract_invoice(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
     line_items: List[LineItem] = []
     for n, (it, r) in enumerate(zip(items, result.items), 1):
         nums = [t for t in it["tokens"] if _is_num(t)] or it["tokens"]
-        conf = field_confidence(_conf(nums), verified=bool(r.passed), corrected=False,
+        conf = field_confidence(_conf(nums), verified=bool(r.passed) and not r.repaired, corrected=r.repaired,
                                 contradicted=r.passed is False, cleaned=it.get("cleaned", False))
+        disc = it.get("discount")
+        if disc and it.get("discount_is_pct") and it.get("quantity") is not None and r.unit_price is not None:
+            disc = round(it["quantity"] * r.unit_price * disc / 100, 2)     # contract: discount as an amount
+        if r.repaired:
+            notes.setdefault("line_items", []).append(f"line {n}: {r.explanation}")
         line_items.append(LineItem(description=it["description"], quantity=it.get("quantity"), unit=it.get("unit"),
-                                   unit_price=it.get("unit_price"), discount=it.get("discount"),
-                                   tax_rate=it.get("tax_rate"), amount=it.get("amount"),
+                                   unit_price=r.unit_price, discount=disc or None,
+                                   tax_rate=it.get("tax_rate"), amount=r.amount,
                                    amount_includes_tax=r.includes_tax, confidence=conf,
                                    bbox=back(union_bbox(it["tokens"])), needs_review=needs_review(conf)))
     tax_components = []

@@ -32,12 +32,17 @@ SHIFT_NAME = {1: "row below", -1: "row above"}
 
 
 def _shifted(lines: List[Line], c: Candidate, s: int) -> Candidate | None:
-    j = c.line_index + s
-    if c.line_index < 0 or not 0 <= j < len(lines) or j == c.amount_line:
+    """The amount one ROW of the amount column away from the one paired now. Rows are counted in the
+    amount column, skipping label-only lines: a photo can split one printed row into a label line and
+    an amount line ('Total Deductions' / '8,491.00'), and counting raw lines then lands on the label."""
+    if c.line_index < 0 or c.amount_line < 0:
+        return None
+    j = c.amount_line + s
+    while 0 <= j < len(lines) and not split_amount(lines[j])[1]:
+        j += s
+    if not 0 <= j < len(lines) or j == c.amount_line:
         return None
     _, amount = split_amount(lines[j])
-    if not amount:
-        return None
     label, _ = split_amount(lines[c.line_index])
     alt = _amount_candidate(c.field, label or lines[c.line_index].tokens, amount, c.match_score)
     if alt is None:

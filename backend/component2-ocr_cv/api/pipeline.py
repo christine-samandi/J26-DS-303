@@ -143,6 +143,7 @@ def read_tokens(img: np.ndarray, engine: str, lang: str) -> list:
 # (psm 4) and keeps whichever reading the tax arithmetic and amount format support better.
 MONEY_TOKEN = re.compile(r"^\d{1,3}(?:,\d{3})+(?:\.\d{2})?$|^\d+\.\d{2}$")
 GOOD_DECIMAL_SHARE = 0.5            # under half the amounts with '.dd' cents = decimal points lost
+GEOMETRIC = ("resize", "deskew", "perspective")    # steps that move pixels; the others only change tones
 ALT_PSM = 4                         # single column of variable-size text: keeps boxed header rows
 
 
@@ -224,6 +225,25 @@ def analyse(img: np.ndarray, doc_id: str, lang: str = "auto", use_preprocessing:
                                    reason="second reading passes more tax checks / keeps decimal points")
                 else:
                     reading["reason"] = "second reading was not better; first kept"
+                best = max(first, second)
+                if looks_broken(best) and out.document_type == "payslip":
+                    # Glare and bold print can defeat both readings in different places (PS_007: the
+                    # binarised page lost TOTAL DEDUCTION and NET SALARY, the plain page lost APIT).
+                    # A third, unprocessed reading of the same geometry joins them, and the payslip
+                    # arithmetic referees each field across the three readings (fusion, own method).
+                    from entity_extraction.fusion import extract_fused
+                    plain = preprocess(img, steps=[st for st in res.steps_applied if st in GEOMETRIC]).image
+                    plain_tokens = guard(run_tesseract(plain, lang=lang, psm=6))
+                    readings = {"binarised": tokens if reading["used"] == "binarised page" else alt_tokens,
+                                "layout": alt_tokens, "plain": plain_tokens}
+                    f_out, f_report = extract_fused(readings, doc_id, to_original=to_original,
+                                                    engine_label="tesseract-5 (3 readings fused)")
+                    third = reading_quality(plain_tokens, f_report, len(f_out.extracted_fields))
+                    reading.update(third=third)
+                    if (third[0], third[1]) > (best[0], best[1]):
+                        out, report = f_out, f_report
+                        reading.update(used="3 readings fused by payslip arithmetic",
+                                       reason="no single reading passed the checks; fused fields pass more")
             report["reading"] = reading
     out.processing_ms = int((time.time() - t0) * 1000)
     report["preprocessing"] = res.steps_applied if use_preprocessing else []
@@ -241,11 +261,56 @@ def run_pipeline(img: np.ndarray, doc_id: str, lang: str = "auto", use_preproces
     return out, report
 
 
+ROTATIONS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+
+def _osd_rotation(img: np.ndarray) -> Optional[int]:
+    """Clockwise rotation that makes the text upright, from Tesseract's orientation detection (OSD);
+    None when OSD is not installed or not sure."""
+    try:
+        import pytesseract
+        osd = pytesseract.image_to_osd(img, output_type=pytesseract.Output.DICT)
+        rot = int(osd.get("rotate", 0)) % 360
+        return rot if rot in ROTATIONS and float(osd.get("orientation_conf", 0)) >= 1.0 else None
+    except Exception:
+        return None
+
+
+def run_any_orientation(img: np.ndarray, doc_id: str, **kw) -> Tuple[OCROutput, dict, np.ndarray]:
+    """Run the pipeline; if the page is not recognised, it may be photographed sideways or upside down
+    (deskew only straightens small tilts). Then the page is turned upright - by Tesseract OSD when it
+    is sure, otherwise by trying 90, 270 and 180 degrees - and the reading that recognises the document
+    with the most fields is kept. Normal photos never pay for this. Returns the image actually read,
+    so boxes and the visual check refer to the upright page."""
+    out, report = run_pipeline(img, doc_id, **kw)
+    if out.document_type != "unknown":
+        return out, report, img
+    osd = _osd_rotation(img)
+    angles = [osd] if osd else [90, 270, 180]
+    best = None
+    for a in angles:
+        turned = cv2.rotate(img, ROTATIONS[a])
+        o, r = run_pipeline(turned, doc_id, **kw)
+        if o.document_type == "unknown":
+            continue
+        key = (len(o.extracted_fields), o.overall_confidence)
+        if best is None or key > best[0]:
+            best = (key, o, r, turned, a)
+    if best is None:
+        report["orientation"] = {"rotated": 0, "reason": "not recognised in any orientation"}
+        return out, report, img
+    _, o, r, turned, a = best
+    r["orientation"] = {"rotated": a, "reason": ("Tesseract orientation detection" if osd else
+                                                 "page recognised only after turning it") +
+                        f"; rotated {a} degrees clockwise; boxes refer to the upright page"}
+    return o, r, turned
+
+
 def process_upload(data: bytes, filename: str, doc_id: Optional[str] = None, lang: str = "auto",
                    use_preprocessing: bool = True, engine: str = "tesseract") -> PipelineResult:
     img, pages = decode_upload(data, filename)
     doc = doc_id or (filename.rsplit(".", 1)[0] if filename else "upload")
-    out, report = run_pipeline(img, doc, lang=lang, use_preprocessing=use_preprocessing, engine=engine)
+    out, report, img = run_any_orientation(img, doc, lang=lang, use_preprocessing=use_preprocessing, engine=engine)
     if pages > 1:
         report["note"] = f"PDF has {pages} pages; only page 1 was processed"
     return PipelineResult(output=out, report=report, image=img, pages=pages)

@@ -7,6 +7,7 @@ human-readable report of every check and correction (the explanation behind each
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
@@ -43,6 +44,71 @@ def detect_languages(tokens: Sequence, min_words: int = 3, min_conf: float = 0.6
     return langs or ["en"]
 
 
+SUM_TOLERANCE = 0.011
+MIN_DEDUCTION_LINES = 3
+
+
+def deduction_sum_check(tokens: Sequence, cands: dict) -> Optional[dict]:
+    """Own method: every amount printed between TOTAL EARNINGS and TOTAL DEDUCTIONS is a deduction
+    line, so they must add up to the printed total. One equation then verifies APIT, EPF employee and
+    every other deduction at once - fields no other rule can check (APIT was always 'unverified').
+    Uses the amount column only, so it works even when labels and amounts are paired a row apart.
+    OCR slips inside the list are handled the same way as elsewhere: a number printed without any
+    separator on a slip whose amounts carry cents lost its decimal point ('53000' = 530.00), a row
+    number stuck to an amount is dropped ('1 1,000.00'), and the sum may be repaired by changing ONE
+    digit of ONE line (reported; the line is not an output field)."""
+    from entity_extraction.amounts import parse_amount
+    from entity_extraction.extractor import group_lines, split_amount
+    from entity_extraction.invoice_checks import digit_close
+
+    g, td = cands.get("gross_income"), cands.get("total_deductions")
+    if not g or not td or g.amount_line < 0 or td.amount_line <= g.amount_line:
+        return None
+    gross, target = float(g.value), float(td.value)
+    rows = []
+    for ln in group_lines(tokens)[g.amount_line + 1: td.amount_line]:
+        _, amt = split_amount(ln)
+        if not amt:
+            continue
+        if len(amt) >= 2 and amt[0].text.isdigit() and len(amt[0].text) == 1 and "," in amt[1].text:
+            amt = amt[1:]                         # 'recovery 1' + '1,000.00'
+        rows.append(amt)
+    if len(rows) < MIN_DEDUCTION_LINES:
+        return None
+    has_cents = sum(bool(re.search(r"[.,\s]\d{2}$", " ".join(t.text for t in a))) for a in rows) >= 0.6 * len(rows)
+    amounts, notes = [], []
+    for amt in rows:
+        raw = " ".join(t.text for t in amt)
+        p = parse_amount(raw)
+        if p is None:
+            return None                           # an unreadable amount: the sum cannot be trusted either way
+        v = p.value
+        if has_cents and len(amt) == 1 and raw.isdigit() and len(raw) >= 3:
+            v = round(v / 100, 2)                 # decimal point lost
+            notes.append(f"'{raw}' read as {v:,.2f} (decimal point lost)")
+        if abs(v - gross) <= SUM_TOLERANCE:
+            continue                              # the TOTAL EARNINGS line repeated under its label
+        amounts.append(v)
+    total = round(sum(amounts), 2)
+    passed = abs(total - target) <= SUM_TOLERANCE
+    repaired = False
+    if not passed:
+        fixes = [(i, round(a + target - total, 2)) for i, a in enumerate(amounts)
+                 if a + target - total > 0 and digit_close(a, round(a + target - total, 2))]
+        if len(fixes) == 1:
+            i, new = fixes[0]
+            notes.append(f"line {amounts[i]:,.2f} looks like {new:,.2f} (one digit misread)")
+            passed = True
+            repaired = True
+    inside = {f for f, c in cands.items() if g.amount_line < c.amount_line < td.amount_line}
+    # a sum that only holds after repairing a line verifies nothing: that line may be one of the fields
+    verified = set() if repaired else inside | {"total_deductions"}
+    return {"passed": passed, "lines": len(amounts), "sum": total, "fields": verified,
+            "check": {"rule": "deduction lines add up to total deductions", "hard": False, "passed": passed,
+                      "explanation": f"{len(amounts)} deduction lines sum to {total:,.2f}; total deductions "
+                                     f"{target:,.2f}" + ("; " + "; ".join(notes) if notes else "")}}
+
+
 def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
                     processing_ms: Optional[int] = None,
                     to_original: Optional[Callable[[List[int]], List[int]]] = None,
@@ -57,8 +123,14 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
         cands = candidates
     else:
         cands, alignment = extract_aligned(tokens)
+    td, net, gross = cands.get("total_deductions"), cands.get("net_amount"), cands.get("gross_income")
+    if td and net and td.value == net.value and not (gross and abs(gross.value - 2 * net.value) < 0.011):
+        # one printed amount cannot be both (two merged rows on a glare photo); net is the bold line
+        cands = {f: c for f, c in cands.items() if f != "total_deductions"}
     amounts = {f: c.value for f, c in cands.items() if isinstance(c.value, float)}
     fiscal: FiscalReport = validate_and_correct(amounts)
+    dsum = deduction_sum_check(tokens, cands) if candidates is None else None
+    sum_verified = dsum["fields"] if dsum and dsum["passed"] else set()
 
     out_fields: List[ExtractedField] = []
     for f, c in cands.items():
@@ -67,7 +139,7 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
         value = fiscal.values.get(f, c.value)
         conf = field_confidence(
             c.ocr_confidence,
-            verified=fiscal.verified(f) and f not in fiscal.corrections,
+            verified=(fiscal.verified(f) or f in sum_verified) and f not in fiscal.corrections,
             corrected=f in fiscal.corrections or c.realigned,
             contradicted=fiscal.contradicted(f),
             cleaned=c.cleaned,
@@ -85,7 +157,7 @@ def extract_payslip(tokens: Sequence, doc_id: str, engine: str = "tesseract-5",
                        engine=engine, processing_ms=processing_ms)
     report = {
         "checks": [{"rule": c.rule, "hard": c.hard, "passed": c.passed, "explanation": c.explanation}
-                   for c in fiscal.checks],
+                   for c in fiscal.checks] + ([dsum["check"]] if dsum else []),
         "corrections": {f: {"ocr_value": a, "corrected_value": b} for f, (a, b) in fiscal.corrections.items()},
         "notes": {f: c.notes for f, c in cands.items() if c.notes},
         "helper_values": {f: cands[f].value for f in HELPER_FIELDS if f in cands},

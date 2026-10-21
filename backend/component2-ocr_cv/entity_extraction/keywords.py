@@ -22,22 +22,24 @@ HELPER_FIELDS = {"basic_salary", "allowances", "cola"}   # cola: cost-of-living 
 FIELD_LABELS: Dict[str, List[str]] = {
     "gross_income": [
         "gross salary", "gross pay", "gross earnings", "gross income", "total earnings", "total gross",
+        "total gross remuneration", "gross remuneration",          # annual employer (APIT) certificate
         "මුළු ආදායම",                                      # verified on a real Sinhala payslip (2026-10-20)
         "දළ වැටුප", "මුළු ඉපැයීම්",                       # TODO verify on real payslips
         "மொத்த சம்பளம்", "மொத்த வருமானம்",                # TODO verify on real payslips
     ],
     "basic_salary": [
-        "basic salary", "basic pay", "basic",
+        "basic salary", "basic pay", "basic", "consolidated salary",   # 'Consolidated Salary' on a real slip (PS_001)
         "මූලික වැටුප", "அடிப்படைச் சம்பளம்", "அடிப்படை சம்பளம்",
         "සමගාමී වැටුප",                                   # basic-salary row on a real Sinhala payslip (2026-10-20)
     ],
     "cola": [
-        "cola", "c.o.l.a", "cost of living allowance", "cost of living",
-        "සී.එල්.ඒ. ගැලපීම", "සී.එල්.ඒ.",                  # verified on a real Sinhala payslip (2026-10-20)
+        "cola", "c.o.l.a", "cost of living allowance", "cost of living", "cla adjustment", "c l a adjustment",
+        "cla",                                                     # 'CLA Adjustment' on a real slip (PS_001)
+        "සී.එල්.ඒ. ගැලපීම", "සී.එල්.ඒ.", "එල්.ඒ. ගැලපීම", "ගැලපීම",   # OCR often drops the 'සී.' (PS_002)                  # verified on a real Sinhala payslip (2026-10-20)
         "ජීවන වියදම් දීමනාව",                              # TODO verify on real payslips
     ],
     "allowances": [
-        "allowances", "allowance", "total allowances",
+        "allowances", "total allowances",       # not singular 'allowance': 'Fuel Allowance for Managers' is ONE allowance, not the total
         "දීමනා", "கொடுப்பனவுகள்",
     ],
     "epf_employee": [
@@ -56,6 +58,7 @@ FIELD_LABELS: Dict[str, List[str]] = {
     ],
     "apit": [
         "apit", "paye", "paye tax", "advance personal income tax", "pay as you earn", "income tax",
+        "amount of tax deducted", "tax deducted",                  # annual employer (APIT) certificate
         "අග්‍රිම පුද්ගල ආදායම් බද්ද", "முற்கூட்டிய தனிநபர் வருமான வரி",
     ],
     "total_deductions": [
@@ -79,7 +82,9 @@ def normalise(text: str) -> str:
     """Lower-case, Unicode NFC, keep letters/digits/% and spaces only."""
     text = unicodedata.normalize("NFC", text).lower()
     text = re.sub(r"[^\w%඀-෿஀-௿ ]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    # Spaced or dotted abbreviations: 'A P I T', 'E.T.F.CONTRIBUTION' -> 'apit', 'etf contribution'
+    return re.sub(r"\b(?:[a-z] ){1,5}[a-z]\b", lambda m: m.group().replace(" ", ""), text)
 
 
 def _sim(a: str, b: str) -> float:
@@ -128,6 +133,12 @@ def match_field(label_text: str) -> Optional[Tuple[str, float, str]]:
     # A 'recovery' line is a deduction ('... මුලික වැටුප් ප්‍රතිසාධනය' = performance-base salary recovery),
     # never the basic salary or an allowance.
     if field in ("basic_salary", "allowances", "cola") and RECOVERY & set(words):
+        return None
+    # One named allowance ('Fuel Allowance for Managers') is not the allowances TOTAL used in gross = basic + allowances
+    if field == "allowances" and "total" not in words and "allowances" not in words and "දීමනා" not in words:
+        return None
+    # 'TOTAL FOR P.A.Y.E. TAX' is the income the tax is calculated on, not the tax withheld (PS_007/8)
+    if field == "apit" and ("total" in words or "for" in words):
         return None
     # Percentage cue resolves EPF employee (8%) vs employer (12%) when the words alone are ambiguous.
     if field.startswith("epf_"):
