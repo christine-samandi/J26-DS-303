@@ -1,0 +1,240 @@
+{
+  "schema_version": "0.2",
+  "doc_id": "SYN_solar_invoice_mock_01",
+  "document_type": "invoice",
+  "languages": [
+    "en"
+  ],
+  "extracted_fields": [
+    {
+      "field_name": "issuer",
+      "value": "SUNLANKA SOLAR (PVT) LTD",
+      "raw_text": "SUNLANKA SOLAR (PVT) LTD",
+      "confidence": 0.92,
+      "bbox": [
+        82,
+        76,
+        541,
+        30
+      ],
+      "tax_entity": "EMPLOYER_OR_ISSUER",
+      "needs_review": true
+    },
+    {
+      "field_name": "seller_reg_no",
+      "value": "114567890-7000",
+      "raw_text": "114567890-7000",
+      "confidence": 0.92,
+      "bbox": [
+        332,
+        240,
+        186,
+        30
+      ],
+      "tax_entity": "SELLER_TAX_REGISTRATION",
+      "needs_review": true
+    },
+    {
+      "field_name": "document_number",
+      "value": "SL-2026-0142",
+      "raw_text": "SL-2026-0142",
+      "confidence": 0.91,
+      "bbox": [
+        902,
+        245,
+        151,
+        17
+      ],
+      "tax_entity": "DOCUMENT_REFERENCE",
+      "needs_review": true
+    },
+    {
+      "field_name": "document_date",
+      "value": "2026-08-14",
+      "raw_text": "14/08/2026",
+      "confidence": 0.96,
+      "bbox": [
+        902,
+        287,
+        124,
+        18
+      ],
+      "tax_entity": "DOCUMENT_DATE",
+      "needs_review": false
+    },
+    {
+      "field_name": "subtotal",
+      "value": 850000.0,
+      "raw_text": "850,000.00",
+      "confidence": 0.988,
+      "bbox": [
+        981,
+        695,
+        124,
+        18
+      ],
+      "tax_entity": "TAXABLE_VALUE",
+      "needs_review": false
+    },
+    {
+      "field_name": "vat",
+      "value": 153000.0,
+      "raw_text": "153,000.00",
+      "confidence": 0.988,
+      "bbox": [
+        982,
+        737,
+        123,
+        18
+      ],
+      "tax_entity": "VAT_CHARGED",
+      "needs_review": false
+    },
+    {
+      "field_name": "total_amount",
+      "value": 1003000.0,
+      "raw_text": "1,003,000.00",
+      "confidence": 0.97,
+      "bbox": [
+        962,
+        779,
+        144,
+        18
+      ],
+      "tax_entity": "DOCUMENT_TOTAL",
+      "needs_review": false
+    },
+    {
+      "field_name": "amount_paid",
+      "value": 1003000.0,
+      "raw_text": "1,003,000.00",
+      "confidence": 0.979,
+      "bbox": [
+        962,
+        821,
+        144,
+        18
+      ],
+      "tax_entity": "AMOUNT_PAID",
+      "needs_review": false
+    },
+    {
+      "field_name": "balance_due",
+      "value": 0.0,
+      "raw_text": "0.00",
+      "confidence": 0.988,
+      "bbox": [
+        1011,
+        863,
+        46,
+        16
+      ],
+      "tax_entity": "BALANCE_DUE",
+      "needs_review": false
+    }
+  ],
+  "overall_confidence": 0.966,
+  "needs_review": true,
+  "engine": "tesseract-5",
+  "line_items": [
+    {
+      "description": "Solar PV Panel 550W Mono",
+      "quantity": 10.0,
+      "unit_price": 45000.0,
+      "amount": 450000.0,
+      "amount_includes_tax": false,
+      "confidence": 0.976,
+      "bbox": [
+        82,
+        498,
+        1023,
+        30
+      ],
+      "needs_review": false
+    },
+    {
+      "description": "Hybrid Inverter 5kW",
+      "quantity": 1.0,
+      "unit_price": 285000.0,
+      "amount": 285000.0,
+      "amount_includes_tax": false,
+      "confidence": 0.985,
+      "bbox": [
+        82,
+        540,
+        1023,
+        30
+      ],
+      "needs_review": false
+    },
+    {
+      "description": "Mounting Structure & Wiring",
+      "quantity": 1.0,
+      "unit_price": 65000.0,
+      "amount": 65000.0,
+      "amount_includes_tax": false,
+      "confidence": 0.985,
+      "bbox": [
+        82,
+        582,
+        1009,
+        29
+      ],
+      "needs_review": false
+    },
+    {
+      "description": "Installation",
+      "quantity": 1.0,
+      "unit_price": 50000.0,
+      "amount": 50000.0,
+      "amount_includes_tax": false,
+      "confidence": 0.985,
+      "bbox": [
+        82,
+        624,
+        1009,
+        30
+      ],
+      "needs_review": false
+    }
+  ],
+  "tax_components": [
+    {
+      "name": "VAT",
+      "rate": 0.18,
+      "amount": 153000.0,
+      "confidence": 0.988,
+      "bbox": [
+        982,
+        737,
+        123,
+        18
+      ],
+      "needs_review": false
+    }
+  ],
+  "attributes": [
+    {
+      "key": "System Capacity",
+      "value": "5 kw",
+      "confidence": 0.92,
+      "bbox": [
+        332,
+        328,
+        53,
+        18
+      ]
+    },
+    {
+      "key": "Grid Connection",
+      "value": "CEB Net Metering",
+      "confidence": 0.96,
+      "bbox": [
+        332,
+        370,
+        192,
+        22
+      ]
+    }
+  ]
+}
