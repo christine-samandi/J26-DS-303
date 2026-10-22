@@ -31,7 +31,7 @@ from assurance_pipeline.pipeline import (
     assure_tax_total,
 )
 from citation_verifier.verifier import CitationClaim, EvidenceSource
-
+from human_review.audit import AuditEventType
 
 app = FastAPI(
     title="Component 4 Assurance API",
@@ -482,6 +482,14 @@ class ReviewCaseResponse(BaseModel):
     feedback: ReviewFeedbackResponse | None
 
 
+class ReviewAuditEventResponse(BaseModel):
+    event_id: str
+    case_id: str
+    event_type: AuditEventType
+    occurred_at: datetime
+    actor_id: str | None
+    decision: ReviewerDecision | None
+
 
 # Created on first use, so tests can inject a test repository.
 review_repository = None
@@ -656,7 +664,7 @@ def complete_human_review(
     request: CompleteReviewRequest,
 ):
     try:
-        case = get_review_repository().complete_review(
+        case = review_repository.complete_review(
             case_id=case_id,
             reviewer_id=request.reviewer_id,
             decision=request.decision,
@@ -674,3 +682,42 @@ def complete_human_review(
         )
 
     return review_case_response(case)
+
+
+@app.get(
+    "/human-review/cases/{case_id}/history",
+    response_model=list[ReviewAuditEventResponse],
+)
+def get_human_review_history(case_id: str):
+    """Retrieve the stored audit history for a review case."""
+
+    repository = get_review_repository()
+
+    get_history = getattr(repository, "get_history", None)
+
+    if not callable(get_history):
+        raise HTTPException(
+            status_code=501,
+            detail="Audit history is not supported by this storage backend.",
+        )
+
+    try:
+        history = get_history(case_id)
+
+    except ReviewCaseNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Review case not found.",
+        )
+
+    return [
+        ReviewAuditEventResponse(
+            event_id=event.event_id,
+            case_id=event.case_id,
+            event_type=event.event_type,
+            occurred_at=event.occurred_at,
+            actor_id=event.actor_id,
+            decision=event.decision,
+        )
+        for event in history
+    ]

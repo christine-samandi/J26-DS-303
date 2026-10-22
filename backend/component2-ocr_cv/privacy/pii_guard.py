@@ -26,6 +26,7 @@ KIND and COUNT of what was masked plus the masked regions, never the values.
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Sequence, Tuple
 
@@ -33,7 +34,8 @@ MASK = "●"
 
 NIC_OLD = re.compile(r"^\d{9}[VvXx]$")
 NIC_NEW = re.compile(r"^(19|20)\d{10}$")
-PHONE = re.compile(r"(?:\+94|0094|\b0)\s?(?:7\d|[1-9]\d)[\s-]?\d{3}[\s-]?\d{4}\b")
+PHONE = re.compile(r"(?:\+94|0094|\b0)\s?(?:7\d|[1-9]\d)[\s-]?\d{3}[\s-]?\d{4}\b"
+                   r"|\b0[1-9](?:[\s-]?\d){8}\b")      # any grouping: '071 4 562 318', '011 2 925 640'
 LONG_ID = re.compile(r"^#?\d{9,}$")
 HEADER_ID = re.compile(r"^#?\d{8,}$")          # 8+ digits in the page header: account / customer numbers
 INITIAL = re.compile(r"^(?:[A-Z][.,]?|[A-Z](?:\.[A-Z])+\.?|\d)$")   # 'J', 'T.', 'W.A.D.' (OCR may read J as 9)
@@ -56,6 +58,11 @@ ADDRESS_LINE = re.compile(r"^\W*no\.?\s*\d+(/\d+)*|\b(road|rd|mawatha|lane|place
 FIELD_ABBREV = re.compile(r"\b(?:e\.?\s?p\.?\s?f|e\.?\s?t\.?\s?f|w\.?\s?&\s?o\.?\s?p|p\.?\s?a\.?\s?y\.?\s?e|a\s?p\s?i\s?t)\b", re.I)
 # Money labels: a long number on such a line is an amount printed without separators ('4339511.65'), not an id
 MONEY_LINE = re.compile(r"\b(?:lkr|rs|amount|remuneration|benefits?|salary|gross|tax|total|earnings)\b", re.I)
+# A registration number of the SELLER / charity identifies an organisation, not a person, and Component 3
+# needs it (approved-charity check for donation relief): 'Supplier's TIN', 'Charity Reg No', 'VAT Reg No'.
+REG_LINE = re.compile(r"(\bsupplier'?s?|\bseller|\bvat\s*reg|\bcompany\s*reg|\bcharity\s*reg|"
+                      r"\breg(istration)?\.?\s*no|\bbr\s*no\b|ලියාපදිංචි)", re.I)
+COLUMN_GAP = 40                 # px; with 3 letter-heights, a wider gap separates two page columns
 KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|date|page|currency|lkr|"
                         r"pay\s*slip|payslip|salary|department|balance|total|"
                         # document titles on purchase documents: 'TAX INVOICE' under a seller's address
@@ -66,7 +73,7 @@ KEEP_WORDS = re.compile(r"\b(bank|plc|ltd|pvt|limited|branch|statement|account|d
                         r"solar|solutions|foundation|services|engineering|electricity|broadband|networks|"
                         # payslip label words: 'E.P.F. EMPLOYEE CONTRIBUTION' looked like initials + a name
                         r"contribution|employee|employer|allowance|deductions?|gross|earnings|loan|"
-                        r"distribution|panel|inverter|seal|signature|advance|amount|due|paid)\b", re.I)
+                        r"distribution|panel|inverter|seal|signature|advance|amount|due|paid|payments?|credits?|debits?)\b", re.I)
 
 
 @dataclass
@@ -106,6 +113,21 @@ def _is_amount_or_date(text: str) -> bool:
     return bool(re.fullmatch(r"[\d,.\-/]+", text)) and bool(re.search(r"[.,/]", text)) and not LONG_ID.match(text)
 
 
+def _columns(tokens, ix: List[int]) -> List[List[int]]:
+    """Split one line into column segments at wide gaps (two-column letterheads)."""
+    cols = [[ix[0]]] if ix else []
+    for a, b in zip(ix, ix[1:]):
+        gap = tokens[b].bbox[0] - (tokens[a].bbox[0] + tokens[a].bbox[2])
+        (cols.append([b]) if gap > max(COLUMN_GAP, 3 * tokens[b].bbox[3]) else cols[-1].append(b))
+    return cols
+
+
+def _overlaps(tokens, seg: List[int], x0: int, x1: int) -> bool:
+    s0 = min(tokens[i].bbox[0] for i in seg)
+    s1 = max(tokens[i].bbox[0] + tokens[i].bbox[2] for i in seg)
+    return s0 < x1 and s1 > x0
+
+
 def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
     """Return (tokens with personal data masked, report). Input tokens are not modified."""
     toks = list(tokens)
@@ -131,7 +153,9 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
             if NIC_OLD.match(t) or NIC_NEW.match(t):
                 mark([i], "nic")
             elif (LONG_ID.match(t) or (n < header_rows and HEADER_ID.match(t))) \
-                    and not MONEY_LINE.search(" ".join(texts)):
+                    and not MONEY_LINE.search(" ".join(texts)) \
+                    and not REG_LINE.search(" ".join(texts[:j])):          # 'Supplier's TIN : 114...'
+
                 mark([i], "long_id")
         joined = " ".join(texts)
         for pat, kind in ((PHONE, "phone"), (CARD, "card")):
@@ -155,6 +179,8 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
                     break
                 label = " ".join(toks[i].text for i in ix[j:j + k])
                 kind = next((kd for kd, rx in LABEL_RE if rx.match(label)), None)
+                if kind == "tin" and REG_LINE.search(" ".join(toks[i].text for i in ix[:j + k])):
+                    break                                            # the seller's TIN, not a person's
                 if kind:
                     rest = [i for i in ix[j + k:] if toks[i].text.strip(" :-")]
                     if kind == "person_no" and not any(re.search(r"[^\W\d_]", toks[i].text) for i in rest):
@@ -195,18 +221,29 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
         text = " ".join(toks[i].text for i in ix)
         if not ADDRESS_LINE.search(text):
             continue
+        # The address block is one COLUMN: on a two-column letterhead the seller's brand ('Dialog') or
+        # logo text ('Children's Welfare') shares 'lines' with the buyer's address and is not masked.
+        seg = next(c for c in _columns(toks, ix) if ADDRESS_LINE.search(" ".join(toks[i].text for i in c)))
+        ax0 = min(toks[i].bbox[0] for i in seg) - 20
+        ax1 = max(toks[i].bbox[0] + toks[i].bbox[2] for i in seg) + 20
+
+        def in_column(m):
+            return [i for c in _columns(toks, lines[m]) if _overlaps(toks, c, ax0, ax1) for i in c]
+
         block = [n]
         if n > 0:                                                   # the name line just above
-            prev = " ".join(toks[i].text for i in lines[n - 1])
-            if not KEEP_WORDS.search(prev) and not re.search(r"\d", prev) and len(prev.split()) <= 5:
+            prev = " ".join(toks[i].text for i in in_column(n - 1))
+            if prev and not KEEP_WORDS.search(prev) and not re.search(r"\d", prev) and len(prev.split()) <= 5:
                 block.insert(0, n - 1)
         for m in range(n + 1, min(n + 5, len(lines))):             # place lines that follow (may pass the header)
-            nxt = " ".join(toks[i].text for i in lines[m])
-            if KEEP_WORDS.search(nxt) or re.search(r"\d[\d,]*\.\d{2}", nxt) or len(nxt.split()) > 5:
+            nxt = " ".join(toks[i].text for i in in_column(m))
+            if KEEP_WORDS.search(nxt) or REG_LINE.search(nxt) or re.search(r"\d[\d,]*\.\d{2}", nxt) \
+                    or len(nxt.split()) > 5:
                 break
             block.append(m)
         for b in block:
-            words = [i for i in lines[b] if not KEEP_WORDS.search(toks[i].text) and not _is_amount_or_date(toks[i].text)]
+            words = [i for i in in_column(b)
+                     if not KEEP_WORDS.search(toks[i].text) and not _is_amount_or_date(toks[i].text)]
             is_addr = b != block[0] or ADDRESS_LINE.search(" ".join(toks[i].text for i in lines[b]))
             mark(words, "address" if is_addr else "name")
 
@@ -214,7 +251,18 @@ def mask_tokens(tokens: Sequence) -> Tuple[list, PIIReport]:
     learned = {toks[i].text.strip(".,").lower() for i, kd in hide.items()
                if kd in ("name", "address") and len(toks[i].text.strip(".,")) >= 4 and toks[i].text.strip(".,").isalpha()
                and not KEEP_WORDS.search(toks[i].text)}
-    repeats = [i for i, t in enumerate(toks) if i not in hide and t.text.strip(".,").lower() in learned]
+    def echoes(word: str) -> bool:
+        """Exact repeat, or a misread fragment of a masked name: 'scamasingh' shares 'amasingh' with
+        'wickramasinghe' (a photo split the name across two OCR lines)."""
+        w = word.strip(".,:;").lower()
+        if w in learned:
+            return True
+        if len(w) < 6 or not w.isalpha() or KEEP_WORDS.search(w):
+            return False
+        return any(SequenceMatcher(None, w, n).find_longest_match(0, len(w), 0, len(n)).size >= 6
+                   for n in learned if len(n) >= 6)
+
+    repeats = [i for i, t in enumerate(toks) if i not in hide and echoes(t.text)]
     if repeats:
         mark(repeats, "repeat")
 

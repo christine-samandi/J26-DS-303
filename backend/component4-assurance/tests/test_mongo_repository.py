@@ -17,7 +17,7 @@ from human_review.repository import (
     ReviewCaseNotFoundError,
 )
 from human_review.service import create_review_case
-
+from human_review.audit import AuditEventType
 
 @pytest.fixture
 def repository():
@@ -167,3 +167,82 @@ def test_completed_feedback_can_be_retrieved(repository):
 
     assert saved.status == ReviewCaseStatus.COMPLETED
     assert saved.feedback.comment == "Incorrect total."
+
+
+def test_case_creation_records_audit_event(repository):
+    case = repository.add_case(make_case())
+
+    history = repository.get_history(case.case_id)
+
+    assert len(history) == 1
+    assert history[0].event_type == AuditEventType.CASE_CREATED
+
+
+def test_full_review_lifecycle_records_three_events(repository):
+    case = repository.add_case(make_case())
+
+    repository.start_review(case.case_id)
+
+    repository.complete_review(
+        case.case_id,
+        "reviewer-001",
+        ReviewerDecision.REJECT,
+        "Incorrect reported total.",
+    )
+
+    history = repository.get_history(case.case_id)
+
+    assert [event.event_type for event in history] == [
+        AuditEventType.CASE_CREATED,
+        AuditEventType.REVIEW_STARTED,
+        AuditEventType.REVIEW_COMPLETED,
+    ]
+
+    assert history[2].actor_id == "reviewer-001"
+    assert history[2].decision == ReviewerDecision.REJECT
+
+
+def test_invalid_transition_does_not_add_event(repository):
+    case = repository.add_case(make_case())
+
+    repository.start_review(case.case_id)
+
+    with pytest.raises(ValueError, match="PENDING"):
+        repository.start_review(case.case_id)
+
+    history = repository.get_history(case.case_id)
+
+    assert len(history) == 2
+
+
+def test_history_available_from_new_repository_instance(repository):
+    case = repository.add_case(make_case())
+
+    repository.start_review(case.case_id)
+
+    second_repository = MongoReviewCaseRepository(
+        repository.collection
+    )
+
+    history = second_repository.get_history(case.case_id)
+
+    assert len(history) == 2
+    assert history[1].event_type == AuditEventType.REVIEW_STARTED
+
+
+def test_legacy_case_without_events_returns_empty_history(repository):
+    case = repository.add_case(make_case())
+
+    repository.collection.update_one(
+        {"_id": case.case_id},
+        {"$unset": {"events": ""}},
+    )
+
+    history = repository.get_history(case.case_id)
+
+    assert history == ()
+
+
+def test_unknown_case_history_rejected(repository):
+    with pytest.raises(ReviewCaseNotFoundError):
+        repository.get_history("REV-UNKNOWN")
