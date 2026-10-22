@@ -7,6 +7,7 @@ the user confirms amount and date, answers, and presses Recalculate.
 """
 
 import hashlib
+import html
 import os
 import random
 import re
@@ -337,9 +338,30 @@ def tampered_markdown(t: Tampering) -> list[str]:
 
 
 # ---------------- UI: input ----------------
-st.set_page_config(page_title="J26-DS-303 Tax Assistant", layout="wide")
-st.title("Explainable Agentic AI Tax Assistant")
-st.caption("C1 demo · the engine does the math, the LLM only rephrases · law from C3")
+st.set_page_config(page_title="Tax Assistant · Sri Lanka", page_icon="🧾", layout="wide")
+st.markdown(
+    """<style>
+.block-container {padding-top: 2rem; max-width: 1250px;}
+.hero {padding: 1.4rem 1.6rem; border-radius: 14px; margin-bottom: 1rem; color: #fff;
+       background: linear-gradient(135deg, #0f766e, #134e4a);}
+.hero .t {font-size: 1.9rem; font-weight: 700;}
+.hero p {margin: .35rem 0 0; opacity: .9;}
+.result {padding: 1.2rem 1.4rem; border-radius: 14px; margin: .5rem 0 1rem; border: 1px solid;}
+.result.ok {background: rgba(22,163,74,.12); border-color: rgba(22,163,74,.4);}
+.result.due {background: rgba(234,88,12,.10); border-color: rgba(234,88,12,.4);}
+.result .big {font-size: 1.8rem; font-weight: 700;}
+.result .sub {opacity: .8; margin-top: .25rem;}
+[data-testid="stMetric"] {background: rgba(127,127,127,.07); border-radius: 12px;
+                          padding: .8rem 1rem;}
+</style>""",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<div class="hero"><div class="t">🧾 Sri Lanka Tax Assistant</div>'
+    "<p>Upload your payslip and receipts. The tax engine does the math, every figure is "
+    "cited to the Inland Revenue Act, and an independent check verifies the answer.</p></div>",
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.header("Input")
@@ -404,26 +426,28 @@ with st.sidebar:
         year = st.selectbox("Year of assessment", MOCK_YEARS)
         st.caption("Mock rules (C1 stand-in for C3)")
 
-    st.header("Assurance (C4)")
-    live_c4 = st.toggle(
-        "Live C4 assurance",
-        value=isinstance(assurance_client_from_env(env_now), HttpAssuranceClient),
-        help="On: C4's service checks the result. Off: a mock that PASSes unless told not to.",
-    )
-    c4_env = {**env_now, "C4_LIVE": "1" if live_c4 else "0"}
-    force_regen = False
-    if live_c4:
-        st.caption(f"C4 API: {c4_env.get('C4_API_URL', C4_DEFAULT_URL)}")
-    else:
-        force_regen = st.toggle("C4 mock: force one REGENERATE", value=False)
+    with st.expander("⚙️ Developer settings"):
+        st.subheader("Assurance (C4)")
+        live_c4 = st.toggle(
+            "Live C4 assurance",
+            value=isinstance(assurance_client_from_env(env_now), HttpAssuranceClient),
+            help="On: C4's service checks the result. Off: a mock that PASSes unless told not to.",
+        )
+        c4_env = {**env_now, "C4_LIVE": "1" if live_c4 else "0"}
+        force_regen = False
+        if live_c4:
+            st.caption(f"C4 API: {c4_env.get('C4_API_URL', C4_DEFAULT_URL)}")
+        else:
+            force_regen = st.toggle("C4 mock: force one REGENERATE", value=False)
 
-    st.header("Options")
-    use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
-    demo_tamper = st.toggle(
-        "Demo: simulate tampered rewrite",
-        value=False,
-        help="Offline: feeds a deliberately wrong rewrite to the real post-check. No Gemini call.",
-    )
+        st.subheader("Options")
+        use_gemini = st.toggle("Gemini rewrite of explanation", value=False)
+        demo_tamper = st.toggle(
+            "Demo: simulate tampered rewrite",
+            value=False,
+            help="Offline: feeds a deliberately wrong rewrite to the real post-check. "
+            "No Gemini call.",
+        )
     go = st.button("Calculate", type="primary", width="stretch")
 
 # ---------------- run ----------------
@@ -542,6 +566,24 @@ STATUS_BOX.get(result.status, st.info)(
 calc = result.calc
 refs = rule_refs(result.rules, result.reliefs)
 if calc:
+    applied = [f.title for f in result.relief_findings if f.status == "applied" and f.title]
+    if calc.refund > 0:
+        tone, big = "ok", f"You're due a refund of {rs(calc.refund)}"
+    elif calc.tax_payable > 0:
+        tone, big = "due", f"You still need to pay {rs(calc.tax_payable)}"
+    else:
+        tone, big = "ok", "You're all settled: nothing more to pay"
+    sub = (
+        f"YA {request.year_of_assessment} · total tax {rs(calc.total_tax)} · "
+        f"APIT already paid {rs(calc.apit_paid)}"
+    )
+    if applied:
+        sub += " · reliefs applied: " + ", ".join(applied)
+    st.markdown(
+        f'<div class="result {tone}"><div class="big">{html.escape(big)}</div>'
+        f'<div class="sub">{html.escape(sub)}</div></div>',
+        unsafe_allow_html=True,
+    )
     m1, m2, m3, m4 = st.columns(4)  # not c2: that name is the C2 client used below
     m1.metric("Employment income", rs(calc.employment_income))
     m2.metric("Total tax", rs(calc.total_tax))
@@ -552,7 +594,7 @@ if calc:
     if result.confidence:
         m4.metric("Confidence", f"{result.confidence.score:.2f}")
 
-    st.subheader("Calculation steps")
+    st.subheader("🧮 Calculation steps")
     st.dataframe(
         pd.DataFrame(
             [
@@ -620,7 +662,7 @@ if calc:
                 st.error(f"YA {ya}: {'; '.join(r.review_reasons) or r.status}")
 
 if result.documents:
-    st.subheader("Documents and reliefs")
+    st.subheader("📄 Documents and reliefs")
     st.dataframe(
         pd.DataFrame(
             [
@@ -750,7 +792,7 @@ for ref in docs:
 # C3's first answer is the rules (personal relief, bands); the rest are relief queries
 law = next(iter(getattr(retrieval, "answers", [])), None)
 if law is not None:
-    st.subheader(f"Law used · from C3 GraphRAG, in force on {law.query.as_of_date}")
+    st.subheader(f"⚖️ Law used · from C3 GraphRAG, in force on {law.query.as_of_date}")
     st.dataframe(
         pd.DataFrame(
             [
@@ -771,7 +813,7 @@ if law is not None:
 
 exp = result.explanation
 if exp:
-    st.subheader("Explanation")
+    st.subheader("💬 Explanation")
     label, color = explanation_badge(exp, "rewrite" if demo_tamper else "Gemini rewrite")
     st.badge(label, color=color)
     if exp.rewrite_status != "not_requested":  # only a prompt that was sent is redacted
@@ -797,7 +839,7 @@ if exp:
                 st.markdown(line)
 
 if result.status != "failed":
-    st.subheader("Assurance")
+    st.subheader("🛡️ Assurance")
     if result.assurance == "unavailable":
         st.warning(f"**Assurance unavailable** · {result.assurance_note}")
     if result.verdicts:
@@ -844,7 +886,7 @@ with left:
             width="stretch",
         )
 with right:
-    st.subheader("Checks")
+    st.subheader("✅ Checks")
     for r in result.review_reasons:
         st.warning(f"Review: {named(r, names)}")
     for c in result.conflicts:
