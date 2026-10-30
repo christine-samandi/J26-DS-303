@@ -1,17 +1,26 @@
-"""SROIE public-benchmark check for the OCR stage (raw vs preprocessed).
+"""SROIE public benchmark for the reading stage: fixed page variants vs quality-gated reading.
 
-Why this exists: every other Component 2 result comes from our own small Sri Lankan set.
-This script measures the preprocessing + Tesseract stage on a public, labelled benchmark
-(ICDAR 2019 SROIE receipts), so the effect of preprocessing can be compared with published
-work. It does NOT test field extraction or fiscal checks (SROIE has no Sri Lankan tax fields).
+Why this exists: every other Component 2 result comes from our own small Sri Lankan set. This
+script measures the READING stage (preprocessing + Tesseract) and the document classifier on a
+public, labelled benchmark (ICDAR 2019 SROIE receipts). It does not test field extraction or the
+fiscal checks, because SROIE has no Sri Lankan tax fields.
 
-Data: the corrected SROIE train/val set from github.com/zzzDavid/ICDAR-2019-SROIE (MIT),
-folder data/ with img/*.jpg, box/*.csv (x1..y4,text per line) and key/*.json.
-Keep it under data/public/sroie/ (git-ignored). Never commit it.
+v1 finding: always applying the full preprocessing (built for phone photos) rescues receipts that
+raw OCR fails on, but damages clean scans. v2 therefore tests a reading-quality gate (own method):
+read the page in a few variants and keep the reading with the most confident, word-like
+characters, using nothing but the reading itself (no ground truth). The document type is decided
+by a vote of the classifier over all readings.
+
+Design vs test: the gate was designed on the 'dev' receipts (seed 42) and is reported on a separate
+'test' set (seed 7, disjoint), so the result is not tuned to the receipts it is scored on.
+
+Data: corrected SROIE train/val set from github.com/zzzDavid/ICDAR-2019-SROIE (MIT); folder data/
+with img/*.jpg, box/*.csv (x1..y4,text per line) and key/*.json. Keep it in data/public/sroie/
+(git-ignored). Never commit it.
 
 Usage (from backend/component2-ocr_cv):
     python scripts/sroie_ocr_benchmark.py --sroie data/public/sroie/data --n 50
-Outputs: outputs/sroie/per_image.csv and outputs/sroie/summary.md
+Outputs: outputs/sroie/per_reading.csv and outputs/sroie/summary.md
 """
 from __future__ import annotations
 
@@ -20,9 +29,10 @@ import csv
 import json
 import random
 import re
-import statistics
+import statistics as st
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -32,72 +42,101 @@ import pytesseract
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from document_classifier.classifier import classify_tokens  # noqa: E402
+from ocr_engines.tesseract_engine import run_tesseract  # noqa: E402
+from preprocessing import preprocess  # noqa: E402
 
-def load_preprocess():
-    """Import the component's own preprocessing; return a function image -> image."""
-    from preprocessing import preprocess  # component2-ocr_cv/preprocessing
-
-    def run(img):
-        res = preprocess(img)
-        for attr in ("image", "processed", "output"):
-            if hasattr(res, attr):
-                return getattr(res, attr)
-        return res  # function returned the image itself
-
-    return run
-
-
-def reference_text(box_file: Path) -> str:
-    """Ground-truth lines sorted top-to-bottom, then left-to-right (reading order)."""
-    lines = []
-    for row in box_file.read_text(encoding="utf-8", errors="ignore").splitlines():
-        parts = row.split(",", 8)
-        if len(parts) < 9 or not parts[8].strip():
-            continue
-        x, y = int(parts[0]), int(parts[1])
-        lines.append((y, x, parts[8].strip()))
-    lines.sort(key=lambda t: (round(t[0] / 10), t[1]))
-    return "\n".join(t[2] for t in lines)
+GEOMETRIC = ("resize", "deskew", "perspective")      # steps that move pixels, as in api/pipeline.py
+VARIANTS = ("raw", "full", "grey_psm4", "plain", "raw_psm4")
+PURCHASE = ("receipt", "invoice")                     # SROIE receipts often print 'TAX INVOICE'
+GATED = {                                             # candidate sets compared by the gate
+    "gate: raw / full / grey (recommended)": ("raw", "full", "grey_psm4"),
+    "gate: raw / grey (cheapest)": ("raw", "grey_psm4"),
+    "gate: all 5 readings": VARIANTS,
+}
+WORDLIKE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.,:/&@#%()'-]*$")
+CONFIDENT = 0.80
 
 
+# ---------------------------------------------------------------- readings
+def readings(img):
+    """The page variants the pipeline can produce (same functions as api/pipeline.py)."""
+    full = preprocess(img)
+    steps = full.steps_applied
+    grey_steps = [s for s in steps if s != "threshold"]
+    plain_steps = [s for s in steps if s in GEOMETRIC]
+    yield "raw", img, 6
+    yield "full", full.image, 6
+    yield "grey_psm4", preprocess(img, steps=grey_steps).image, 4
+    yield "plain", preprocess(img, steps=plain_steps).image, 6
+    yield "raw_psm4", img, 4
+
+
+def confident_chars(tokens) -> int:
+    """Reading-quality score (own method): characters in confident, word-like tokens.
+    Uses only the reading itself, so it works on any document at run time."""
+    return sum(len(t.text) for t in tokens if t.confidence >= CONFIDENT and WORDLIKE.match(t.text))
+
+
+def vote(types) -> str:
+    """Document type agreed by most readings; 'unknown' only if no reading found a type."""
+    c = Counter(t for t in types if t != "unknown")
+    return c.most_common(1)[0][0] if c else "unknown"
+
+
+# ---------------------------------------------------------------- metrics
 def norm(text: str) -> str:
-    """Upper-case and collapse spaces: SROIE transcripts are upper-case."""
     return re.sub(r"[ \t]+", " ", text.upper()).strip()
 
 
+def reference_text(box_file: Path) -> str:
+    lines = []
+    for row in box_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        p = row.split(",", 8)
+        if len(p) == 9 and p[8].strip():
+            lines.append((int(p[1]), int(p[0]), p[8].strip()))
+    lines.sort(key=lambda t: (round(t[0] / 10), t[1]))
+    return norm("\n".join(t[2] for t in lines))
+
+
+def tokens_text(tokens) -> str:
+    lines = {}
+    for t in tokens:
+        lines.setdefault(t.line_id, []).append(t.text)
+    return norm("\n".join(" ".join(w) for w in lines.values()))
+
+
 def word_recall(ref: str, hyp: str) -> float:
-    """Share of reference words found anywhere in the OCR output (order-free)."""
-    ref_words = ref.split()
-    hyp_words = {}
-    for w in hyp.split():
-        hyp_words[w] = hyp_words.get(w, 0) + 1
+    pool = Counter(hyp.split())
     hit = 0
-    for w in ref_words:
-        if hyp_words.get(w, 0) > 0:
+    for w in ref.split():
+        if pool[w] > 0:
             hit += 1
-            hyp_words[w] -= 1
-    return hit / len(ref_words) if ref_words else 0.0
+            pool[w] -= 1
+    return hit / max(1, len(ref.split()))
 
 
-def key_hits(key_file: Path, hyp: str) -> tuple[int, int]:
-    """How many of the key values (date, total) appear verbatim in the OCR output."""
-    if not key_file.exists():
-        return 0, 0
-    key = json.loads(key_file.read_text(encoding="utf-8"))
+def key_hits(key_file: Path, hyp: str) -> int:
+    key = json.loads(key_file.read_text(encoding="utf-8")) if key_file.exists() else {}
     flat = hyp.replace(" ", "")
-    vals = [key.get(k, "") for k in ("date", "total") if key.get(k)]
-    return sum(v.upper().replace(" ", "") in flat for v in vals), len(vals)
+    return sum(key[k].upper().replace(" ", "") in flat for k in ("date", "total") if key.get(k))
 
 
-def ocr(img) -> str:
-    return pytesseract.image_to_string(img, lang="eng")
+# ---------------------------------------------------------------- main
+def splits(base: Path, n: int):
+    imgs = sorted(p.stem for p in (base / "img").glob("*.jpg"))
+    a = imgs[:]
+    random.Random(42).shuffle(a)
+    dev = a[:n]
+    rest = [s for s in imgs if s not in set(dev)]
+    random.Random(7).shuffle(rest)
+    return {"dev": dev, "test": rest[:n]}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sroie", required=True, help="folder containing img/, box/, key/")
-    ap.add_argument("--n", type=int, default=50, help="number of receipts (fixed random sample)")
-    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--n", type=int, default=50, help="receipts per split (dev and test)")
     ap.add_argument("--out", default=str(ROOT / "outputs" / "sroie"))
     ap.add_argument("--tesseract-cmd", default=None,
                     help=r"path to tesseract.exe if it is not on PATH, e.g. C:\Program Files\Tesseract-OCR\tesseract.exe")
@@ -106,62 +145,56 @@ def main() -> None:
         pytesseract.pytesseract.tesseract_cmd = args.tesseract_cmd
 
     base = Path(args.sroie)
-    images = sorted((base / "img").glob("*.jpg"))
-    random.Random(args.seed).shuffle(images)
-    images = images[: args.n]
-    preprocess = load_preprocess()
-
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for i, img_path in enumerate(images, 1):
-        stem = img_path.stem
-        ref = norm(reference_text(base / "box" / f"{stem}.csv"))
-        img = cv2.imread(str(img_path))
-        for mode in ("raw", "pre"):
+    per, recs = [], []
+    todo = [(sp, s) for sp, stems in splits(base, args.n).items() for s in stems]
+    for i, (split, stem) in enumerate(todo, 1):
+        ref = reference_text(base / "box" / f"{stem}.csv")
+        img = cv2.imread(str(base / "img" / f"{stem}.jpg"))
+        rec = {"split": split, "image": stem, "r": {}}
+        for name, page, psm in readings(img):
             t0 = time.perf_counter()
-            try:
-                src = img if mode == "raw" else preprocess(img)
-                hyp = norm(ocr(src))
-                err = ""
-            except Exception as e:  # keep going; record the failure
-                hyp, err = "", f"{type(e).__name__}: {e}"
+            toks = run_tesseract(page, lang="eng", psm=psm)
             secs = time.perf_counter() - t0
-            kh, kn = key_hits(base / "key" / f"{stem}.json", hyp)
-            rows.append({
-                "image": stem, "mode": mode,
-                "cer": round(jiwer.cer(ref, hyp), 4) if hyp else 1.0,
-                "wer": round(jiwer.wer(ref, hyp), 4) if hyp else 1.0,
-                "word_recall": round(word_recall(ref, hyp), 4),
-                "key_hits": kh, "key_total": kn,
-                "seconds": round(secs, 2), "error": err,
-            })
-        print(f"[{i}/{len(images)}] {stem}")
+            hyp = tokens_text(toks)
+            row = {"split": split, "image": stem, "reading": name,
+                   "cer": round(jiwer.cer(ref, hyp), 4) if hyp else 1.0,
+                   "word_recall": round(word_recall(ref, hyp), 4),
+                   "key_hits": key_hits(base / "key" / f"{stem}.json", hyp),
+                   "doc_type": classify_tokens(toks).document_type,
+                   "confident_chars": confident_chars(toks), "seconds": round(secs, 2)}
+            rec["r"][name] = row
+            per.append(row)
+        recs.append(rec)
+        print(f"[{i}/{len(todo)}] {split} {stem}")
 
-    with open(out / "per_image.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+    with open(out / "per_reading.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(per[0]))
         w.writeheader()
-        w.writerows(rows)
+        w.writerows(per)
 
-    def agg(mode, col, fn=statistics.mean):
-        return fn([r[col] for r in rows if r["mode"] == mode])
-
-    lines = [f"# SROIE OCR benchmark ({len(images)} receipts, seed {args.seed}, Tesseract eng)", "",
-             "| Metric | Raw | Preprocessed |", "|---|---|---|"]
-    for col, label in (("cer", "Mean CER (lower is better)"), ("wer", "Mean WER (lower is better)"),
-                       ("word_recall", "Mean word recall (order-free)"), ("seconds", "Mean seconds per image")):
-        lines.append(f"| {label} | {agg('raw', col):.3f} | {agg('pre', col):.3f} |")
-    kr = (agg("raw", "key_hits", sum), agg("raw", "key_total", sum))
-    kp = (agg("pre", "key_hits", sum), agg("pre", "key_total", sum))
-    lines.append(f"| Date and total found in text | {kr[0]}/{kr[1]} | {kp[0]}/{kp[1]} |")
-    better = sum(1 for s in {r['image'] for r in rows}
-                 if next(r['cer'] for r in rows if r['image'] == s and r['mode'] == 'pre')
-                 < next(r['cer'] for r in rows if r['image'] == s and r['mode'] == 'raw'))
-    lines.append(f"| Receipts where preprocessing lowered CER | | {better}/{len(images)} |")
-    fails = [r for r in rows if r["error"]]
-    if fails:
-        lines += ["", f"Errors: {len(fails)} (see per_image.csv)"]
-    (out / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    strategies = {f"fixed: {v}": (v,) for v in VARIANTS} | GATED
+    lines = [f"# SROIE reading benchmark ({args.n} dev + {args.n} test receipts, Tesseract eng)", "",
+             "Fixed = always the same page; gate = keep the reading with the most confident characters; "
+             "document type for a gate = vote over its readings.", ""]
+    for split in ("dev", "test"):
+        rows = [r for r in recs if r["split"] == split]
+        lines += [f"## {split}", "", "| Strategy | Mean CER | Median CER | Word recall | Date+total found | "
+                  "Typed receipt/invoice | Seconds |", "|---|---|---|---|---|---|---|"]
+        for label, cands in strategies.items():
+            pick = [max(cands, key=lambda v: r["r"][v]["confident_chars"]) for r in rows]
+            got = [r["r"][v] for r, v in zip(rows, pick)]
+            typed = sum(vote([r["r"][v]["doc_type"] for v in cands]) in PURCHASE for r in rows)
+            secs = st.mean(sum(r["r"][v]["seconds"] for v in cands) for r in rows)
+            lines.append(f"| {label} | {st.mean(g['cer'] for g in got):.3f} | {st.median(g['cer'] for g in got):.3f} | "
+                         f"{st.mean(g['word_recall'] for g in got):.3f} | {sum(g['key_hits'] for g in got)}/"
+                         f"{2 * len(rows)} | {typed}/{len(rows)} | {secs:.1f} |")
+        oracle = [min(VARIANTS, key=lambda v: r["r"][v]["cer"]) for r in rows]
+        lines.append(f"| oracle (best CER, upper bound) | "
+                     f"{st.mean(r['r'][v]['cer'] for r, v in zip(rows, oracle)):.3f} | | | | | |")
+        lines.append("")
+    (out / "summary.md").write_text("\n".join(lines), encoding="utf-8")
     print("\n".join(lines))
 
 

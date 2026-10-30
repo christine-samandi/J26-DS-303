@@ -26,7 +26,12 @@
         "sscl":             { "type": ["number", "null"], "minimum": 0 },
         "total_deductions": { "type": ["number", "null"], "minimum": 0 },
         "net_amount":       { "type": ["number", "null"] },
-        "total_amount":     { "type": ["number", "null"] }
+        "total_amount":     { "type": ["number", "null"] },
+        "subtotal":         { "type": ["number", "null"], "minimum": 0 },
+        "discount":         { "type": ["number", "null"], "minimum": 0 },
+        "amount_paid":      { "type": ["number", "null"], "minimum": 0 },
+        "balance_due":      { "type": ["number", "null"] },
+        "previous_balance": { "type": ["number", "null"] }
       }
     },
     "full_text": { "type": "string", "description": "Optional: every printed line, in reading order, for CER/WER. Leave empty if not typed yet." },
